@@ -1,0 +1,20 @@
+{
+  "name": "@deus/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./migrate": "./src/migrate.ts"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.10.0",
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11",
+    "@deus/telemetry": "workspace:*"
+  }
+}

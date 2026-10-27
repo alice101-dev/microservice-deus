@@ -40,3 +40,12 @@ export function loadConfig<P extends TProperties>(extra: P, env: Record<string, 
   if (issues.length > 0) throw new ConfigError(issues);
   return value as Static<typeof schema>;
 }
+
+export const DatabaseConfig = {
+  DB_HOST: Type.String({ minLength: 1 }),
+  DB_PORT: Type.Integer({ default: 5432, minimum: 1, maximum: 65535 }),
+  DB_NAME: Type.String({ minLength: 1 }),
+  DB_USER: Type.String({ minLength: 1 }),
+  DB_PASSWORD: Type.String({ minLength: 1 }),
+  DB_MAX_CONNECTIONS: Type.Integer({ default: 5, minimum: 1 }),
+};

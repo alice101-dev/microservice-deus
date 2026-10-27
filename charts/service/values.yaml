@@ -21,6 +21,21 @@ resources:
     memory: 256Mi
 env: {}
 envFrom: []
+generatedSecrets: []
+database:
+  enabled: false
+  name: ""
+  cluster: deus-db
+  port: 5432
+  maxConnections: 5
+migrations:
+  activeDeadlineSeconds: 600
+  resources:
+    requests:
+      cpu: 20m
+      memory: 96Mi
+    limits:
+      memory: 256Mi
 telemetry:
   endpoint: http://otel-collector.monitoring.svc.cluster.local.:4318
   metricExportIntervalMs: 30000

@@ -1,0 +1,12 @@
+{
+  "name": "@deus/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "jose": "6.2.13"
+  }
+}

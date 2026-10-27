@@ -26,11 +26,7 @@ spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: {{ .Values.shutdown.terminationGracePeriodSeconds }}
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
-        seccompProfile:
-          type: RuntimeDefault
+        {{- include "service.podSecurityContext" . | nindent 8 }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -46,26 +42,25 @@ spec:
             - name: http
               containerPort: {{ .Values.port }}
           env:
-            - name: SERVICE_NAME
-              value: {{ include "service.name" . | quote }}
-            - name: SERVICE_VERSION
-              value: {{ .Values.image.tag | quote }}
-            - name: SERVICE_NAMESPACE
-              value: {{ .Values.partOf | quote }}
-            - name: DEPLOYMENT_ENVIRONMENT
-              value: {{ .Values.environment | quote }}
+            {{- include "service.commonEnv" . | nindent 12 }}
             - name: PORT
               value: {{ .Values.port | quote }}
-            - name: LOG_LEVEL
-              value: {{ .Values.logLevel | quote }}
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ .Values.telemetry.endpoint | quote }}
-            - name: OTEL_METRIC_EXPORT_INTERVAL
-              value: {{ .Values.telemetry.metricExportIntervalMs | quote }}
             - name: SHUTDOWN_DRAIN_MS
               value: {{ .Values.shutdown.drainMs | quote }}
             - name: SHUTDOWN_FLUSH_MS
               value: {{ .Values.shutdown.flushMs | quote }}
+            {{- if .Values.database.enabled }}
+            {{- include "service.databaseEnv" (dict "context" . "role" "app") | nindent 12 }}
+            - name: DB_MAX_CONNECTIONS
+              value: {{ .Values.database.maxConnections | quote }}
+            {{- end }}
+            {{- range .Values.generatedSecrets }}
+            - name: {{ .env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-%s" (include "service.name" $) .name }}
+                  key: value
+            {{- end }}
             {{- range $name, $value := .Values.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}
@@ -95,7 +90,4 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: ["ALL"]
+            {{- include "service.securityContext" . | nindent 12 }}

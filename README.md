@@ -12,7 +12,8 @@ microservice-deus/
 │   ├── telemetry/      # OpenTelemetry SDK: traces, metrics and logs over OTLP
 │   ├── logger/         # structured logs as OpenTelemetry log records
 │   ├── errors/         # application errors and RFC 9457 problem documents
-│   └── http/           # Elysia service factory: OpenAPI, tracing, errors, health, graceful shutdown
+│   ├── http/           # Elysia service factory: OpenAPI, tracing, errors, health, graceful shutdown
+│   └── db/             # PostgreSQL pool with spans and metrics, Drizzle, tenant transactions, migration runner
 ├── services/<name>/
 │   ├── src/            # index.ts starts the service, app.ts builds it
 │   ├── test/
@@ -58,6 +59,31 @@ failure with `application/problem+json`: `type`, `title`, `status`, `code`, `det
 schema violations, `errors` with one entry per invalid field. Every failure is logged: 4xx as WARN, 5xx as ERROR
 with the stack trace. Unexpected errors never expose their message to the client. Uncaught exceptions are logged
 before the process exits; unhandled rejections are logged.
+
+## Database
+
+Each service owns one database in the CloudNativePG cluster `deus-db` (provisioned by the platform repository) with
+two roles: `<service>_migrator` owns the schema and runs the migrations, `<service>_app` only reads and writes data,
+so row level security applies to it. Set `database.enabled: true` in the service's deploy values; the chart passes
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` from the basic-auth Secrets `deus-db-<service>-app` and
+`deus-db-<service>-migrator`.
+
+- **Queries**: `createPool` (node-postgres) sets `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`
+  and `application_name`, records a client span per query (`db.query.text`, `db.operation.name`, `db.namespace`) and
+  the metrics `db.client.operation.duration`, `db.client.connection.count` and `db.client.connection.pending_requests`.
+- **Tenants**: tenant tables carry `organization_id` and a policy on `current_setting('app.organization_id')`;
+  `withTenant(db, organizationId, tx => ...)` runs the work in a transaction with that setting, so a query without a
+  tenant sees no rows.
+- **Migrations**: `drizzle-kit generate` writes versioned SQL into `services/<service>/migrations` (never
+  `drizzle-kit push`); hand-written changes such as grants use `drizzle-kit generate --custom`. Migrations are
+  forward only and must work with the previous release (expand, then contract). The image carries them, and an
+  Argo CD PreSync Job applies them as the migrator before the new version rolls out: in file order, under an
+  advisory lock, each file in its own transaction with `lock_timeout` 5s, recorded with its checksum so an applied
+  file cannot change. A file with `CREATE INDEX CONCURRENTLY` must hold only that statement and runs outside a
+  transaction.
+- **Linting**: Squawk checks every migration before a commit (`.squawk.toml`: PostgreSQL 18, files run in a
+  transaction; `require-lock-timeout` and `require-statement-timeout` are off because the runner sets both).
+- `make test-integration` runs the tests against a PostgreSQL 18 container.
 
 ## Health and shutdown
 

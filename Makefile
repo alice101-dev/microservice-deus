@@ -7,7 +7,7 @@ TAG ?= $(shell git rev-parse --short=8 HEAD)
 SERVICES ?= $(notdir $(wildcard services/*))
 PLATFORM ?= linux/amd64
 
-.PHONY: install check lint typecheck test chart auth build release
+.PHONY: install check lint typecheck test test-integration chart auth build release
 
 install:
 	bun install --frozen-lockfile
@@ -20,6 +20,13 @@ typecheck:
 
 test:
 	bun test
+
+test-integration:
+	@docker rm -f deus-test-postgres >/dev/null 2>&1 || true
+	docker run -d --name deus-test-postgres -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:18.6-trixie >/dev/null
+	@until docker exec deus-test-postgres pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
+	DATABASE_TEST_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres bun test; status=$$?; \
+		docker rm -f deus-test-postgres >/dev/null; exit $$status
 
 chart:
 	@for s in $(SERVICES); do \

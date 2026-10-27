@@ -5,7 +5,12 @@ COPY packages packages
 COPY services services
 RUN bun install --frozen-lockfile --production --ignore-scripts
 ARG SERVICE
-RUN test -n "$SERVICE" && bun build "services/${SERVICE}/src/index.ts" --target bun --outdir /out --sourcemap=linked
+RUN test -n "$SERVICE" \
+    && entries="services/${SERVICE}/src/index.ts" \
+    && if [ -f "services/${SERVICE}/src/migrate.ts" ]; then entries="$entries services/${SERVICE}/src/migrate.ts"; fi \
+    && bun build $entries --target bun --outdir /out --root "services/${SERVICE}/src" --sourcemap=linked \
+    && mkdir -p /out/migrations \
+    && if [ -d "services/${SERVICE}/migrations" ]; then cp services/${SERVICE}/migrations/*.sql /out/migrations/; fi
 
 FROM oven/bun:1.4.4-distroless
 WORKDIR /app

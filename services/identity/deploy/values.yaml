@@ -3,3 +3,8 @@ image:
 route:
   enabled: true
   pathPrefix: /api/identity
+database:
+  enabled: true
+generatedSecrets:
+  - name: auth
+    env: BETTER_AUTH_SECRET

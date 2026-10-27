@@ -1,10 +1,13 @@
-import { loadConfig } from "@deus/config";
+import { createDatabase, createPool, readiness } from "@deus/db";
 import { serve } from "@deus/http";
 import { createLogger } from "@deus/logger";
 import { startTelemetry } from "@deus/telemetry";
 import { createApp } from "./app";
+import { createAuth } from "./auth";
+import { loadIdentityConfig } from "./config";
+import { schema } from "./schema";
 
-const config = loadConfig({});
+const config = loadIdentityConfig();
 const telemetry = startTelemetry({
   serviceName: config.SERVICE_NAME,
   serviceVersion: config.SERVICE_VERSION,
@@ -14,5 +17,24 @@ const telemetry = startTelemetry({
   metricExportIntervalMs: config.OTEL_METRIC_EXPORT_INTERVAL,
 });
 const logger = createLogger({ name: config.SERVICE_NAME, level: config.LOG_LEVEL, stdout: config.LOG_STDOUT });
+const pool = createPool({
+  host: config.DB_HOST,
+  port: config.DB_PORT,
+  database: config.DB_NAME,
+  user: config.DB_USER,
+  password: config.DB_PASSWORD,
+  applicationName: config.SERVICE_NAME,
+  maxConnections: config.DB_MAX_CONNECTIONS,
+});
+const auth = createAuth(
+  {
+    baseURL: config.AUTH_BASE_URL,
+    secret: config.BETTER_AUTH_SECRET,
+    trustedOrigins: config.AUTH_TRUSTED_ORIGINS.split(",").filter(Boolean),
+    issuer: config.AUTH_ISSUER,
+  },
+  createDatabase(pool, schema),
+  schema,
+);
 
-serve(createApp(config, logger), { config, logger, telemetry });
+serve(createApp(config, logger, auth, [readiness(pool)]), { config, logger, telemetry, onShutdown: () => pool.end() });
