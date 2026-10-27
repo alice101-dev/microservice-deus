@@ -95,7 +95,7 @@ git commit -am "release <tag>" && git push
 
 `make release` builds and pushes every service, then writes the tag into `services/*/deploy/values-staging.yaml`.
 Argo CD (ApplicationSet `apps` of the platform repository) deploys each `services/<name>/deploy` folder with
-`charts/service` into the namespace `deus`; the registry comes from the cluster, never from this public repository.
+`charts/service` into the namespace `<env>-deus` (`staging-deus`); the registry comes from the cluster, never from this public repository.
 
 ## Adding a service
 

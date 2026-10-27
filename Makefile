@@ -23,7 +23,7 @@ test:
 
 chart:
 	@for s in $(SERVICES); do \
-		helm template $$s charts/service -n deus -f services/$$s/deploy/values.yaml \
+		helm template $$s charts/service -n $(ENVIRONMENT)-deus -f services/$$s/deploy/values.yaml \
 			-f services/$$s/deploy/values-$(ENVIRONMENT).yaml \
 			--set image.registry=registry.invalid,image.tag=check >/dev/null || exit 1; \
 		echo "chart ok: $$s"; \
