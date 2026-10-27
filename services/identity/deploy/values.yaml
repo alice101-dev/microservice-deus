@@ -1,0 +1,5 @@
+image:
+  repository: identity
+route:
+  enabled: true
+  pathPrefix: /api/identity

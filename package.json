@@ -1,0 +1,25 @@
+{
+  "name": "microservice-deus",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "check": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test",
+    "lint:sql": "squawk services/*/migrations/*.sql",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.3",
+    "@types/bun": "1.4.4",
+    "lefthook": "2.2.2",
+    "squawk-cli": "2.70.0",
+    "typescript": "7.0.2"
+  }
+}

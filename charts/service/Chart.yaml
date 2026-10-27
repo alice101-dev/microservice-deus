@@ -1,0 +1,5 @@
+apiVersion: v2
+name: service
+description: Shared chart for the deus services
+type: application
+version: 0.1.0
