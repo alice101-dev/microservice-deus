@@ -7,6 +7,11 @@ app.kubernetes.io/name: {{ include "service.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{- define "service.serverSelectorLabels" -}}
+{{ include "service.selectorLabels" . }}
+app.kubernetes.io/component: server
+{{- end -}}
+
 {{- define "service.labels" -}}
 {{ include "service.selectorLabels" . }}
 app.kubernetes.io/part-of: {{ .Values.partOf }}

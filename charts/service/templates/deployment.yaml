@@ -21,6 +21,7 @@ spec:
     metadata:
       labels:
         {{- include "service.labels" . | nindent 8 }}
+        app.kubernetes.io/component: server
     spec:
       serviceAccountName: {{ include "service.name" . }}
       automountServiceAccountToken: false
