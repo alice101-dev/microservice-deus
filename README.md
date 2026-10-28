@@ -16,6 +16,7 @@ microservice-deus/
 │   ├── db/             # PostgreSQL pool with spans and metrics, Drizzle, tenant transactions, migration runner
 │   ├── auth/           # JWT verification against the identity JWKS and the authenticated principal
 │   ├── money/          # IDR amounts as decimal strings and integer cents
+│   ├── outbox/         # transactional outbox: events written with the data, delivered at least once
 │   └── runtime/        # startService and runMigrations: config, telemetry, logger, database and verifier wiring
 ├── services/<name>/
 │   ├── src/            # index.ts starts the service, app.ts builds it
@@ -72,8 +73,32 @@ before the process exits; unhandled rejections are logged.
 | `accounts`     | `/api/accounts`     | the chart of accounts, with a default chart for Indonesian SMEs                          |
 | `ledger`       | `/api/ledger`       | journals (draft, posted, reversal), closed periods and the trial balance                 |
 
-The other services call each other over HTTP with `createClient` from `@deus/http`, forwarding the caller's token:
-the client continues the trace, records `http.client.request.duration` and turns failures into 502 or 504.
+The other services call each other over HTTP with `createClient` from `@deus/http`: the client continues the trace,
+records `http.client.request.duration` and turns failures into 502 or 504.
+
+## Service identity
+
+Calls between services do not carry a user token. Each pod gets a projected service account token with the audience
+`deus-services` (`/var/run/secrets/deus/service/token`, rotated by the kubelet). The receiver verifies it against the
+cluster's OIDC keys (`/openid/v1/jwks`, readable by every service account), accepts only service accounts of its own
+namespace, and checks the caller against an allow-list (`serviceAuthentication` from `@deus/auth`). These endpoints
+live under `/internal/<service>`, which the gateway does not route, and take the organization explicitly:
+
+| Endpoint                         | Callers                                                     |
+| -------------------------------- | ----------------------------------------------------------- |
+| `GET /internal/accounts/lookup`  | ledger, sales, purchases, payments, banking, tax, reporting |
+| `POST /internal/ledger/journals` | sales, purchases, payments, banking, tax (journal `source`) |
+
+## Outbox
+
+A service that must tell another one about a change writes an event into its own `outbox` table in the same
+transaction as the change (`enqueue` from `@deus/outbox`), so the change and the event commit or roll back together.
+The relay of every replica claims due events with a lease (`FOR UPDATE SKIP LOCKED`), calls the handler outside the
+transaction and marks the event delivered. Delivery is at least once: the event id is the `Idempotency-Key` of the
+call, so the receiver applies it once. Failures retry with exponential backoff (up to 5 minutes); a 400, 404 or 422
+answer or the last attempt marks the event dead and logs it as an error. The delivery span continues the trace of
+the request that wrote the event. Metrics: `outbox.events` (topic, outcome), `outbox.delivery.delay`,
+`outbox.backlog` (pending, dead). Delivered events are purged after 7 days.
 
 ## Authentication
 
@@ -85,6 +110,7 @@ the active organization) at `/api/identity/auth/token`. Every other service veri
 
 - Every journal has at least two lines, each with either a debit or a credit, and balances to the cent; amounts are
   decimal strings with at most two fraction digits, computed as integer cents.
+- Only accounts without sub-accounts take postings; header accounts (`postable: false`) only group their children.
 - A posted journal and its lines cannot change: triggers reject the update or delete in the database. A mistake is
   corrected with a reversal (`POST /journals/:id/reverse`), once per journal.
 - `POST /journals` with an `Idempotency-Key` header returns the first journal for the same key and body, and 422 for
