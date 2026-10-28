@@ -1,10 +1,17 @@
-import { authentication, type Principal, requireOrganization, type Verifier } from "@deus/auth";
+import {
+  authentication,
+  type Principal,
+  requireOrganization,
+  type ServiceVerifier,
+  serviceAuthentication,
+  type Verifier,
+} from "@deus/auth";
 import type { BaseConfig } from "@deus/config";
-import { type Database, isUniqueViolation, withTenant } from "@deus/db";
+import { type Database, isUniqueViolation, type Transaction, withTenant } from "@deus/db";
 import { ConflictError, NotFoundError, UnprocessableError } from "@deus/errors";
 import { createService } from "@deus/http";
 import type { Logger } from "@deus/logger";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray, isNotNull } from "drizzle-orm";
 import { t } from "elysia";
 import { DEFAULT_CHART } from "./defaults";
 import { ACCOUNT_TYPES, type Account, accounts, type schema } from "./schema";
@@ -14,6 +21,7 @@ export interface AccountsContext {
   logger: Logger;
   db: Database<typeof schema>;
   verify: Verifier;
+  verifyService: ServiceVerifier;
   readiness?: Array<() => Promise<void>>;
 }
 
@@ -25,15 +33,37 @@ const AccountView = t.Object({
   type: AccountType,
   parentId: t.Nullable(t.String()),
   active: t.Boolean(),
+  postable: t.Boolean(),
 });
-const view = (account: Account) => ({
+const view = (account: Account, headers: ReadonlySet<string>) => ({
   id: account.id,
   code: account.code,
   name: account.name,
   type: account.type,
   parentId: account.parentId,
   active: account.active,
+  postable: !headers.has(account.id),
 });
+
+async function views(tx: Transaction<typeof schema>, rows: Account[]) {
+  if (rows.length === 0) return [];
+  const parents = await tx
+    .selectDistinct({ id: accounts.parentId })
+    .from(accounts)
+    .where(
+      inArray(
+        accounts.parentId,
+        rows.map((row) => row.id),
+      ),
+    );
+  const headers = new Set(parents.flatMap((parent) => (parent.id ? [parent.id] : [])));
+  return rows.map((row) => view(row, headers));
+}
+const Ids = t.Union([
+  t.String({ format: "uuid" }),
+  t.Array(t.String({ format: "uuid" }), { minItems: 1, maxItems: 200 }),
+]);
+export const LOOKUP_CALLERS = ["ledger", "sales", "purchases", "payments", "banking", "tax", "reporting"] as const;
 const Code = t.String({ pattern: "^[0-9A-Za-z][0-9A-Za-z.-]{0,19}$" });
 
 export function createApp(context: AccountsContext) {
@@ -41,16 +71,21 @@ export function createApp(context: AccountsContext) {
   const tenant = <T>(principal: Principal, work: Parameters<typeof withTenant<typeof schema, T>>[2]) =>
     withTenant(db, requireOrganization(principal), work);
 
-  return createService({ config: context.config, logger: context.logger, readiness: context.readiness }).group(
-    "/api/accounts",
-    (api) =>
+  return createService({ config: context.config, logger: context.logger, readiness: context.readiness })
+    .group("/api/accounts", (api) =>
       api
         .use(authentication(context.verify))
         .get(
           "/",
           async ({ principal }) => {
-            const rows = await tenant(principal, (tx) => tx.select().from(accounts).orderBy(asc(accounts.code)));
-            return rows.map(view);
+            return tenant(principal, async (tx) => {
+              const rows = await tx.select().from(accounts).orderBy(asc(accounts.code));
+              const parents = await tx
+                .selectDistinct({ id: accounts.parentId })
+                .from(accounts)
+                .where(isNotNull(accounts.parentId));
+              return rows.map((row) => view(row, new Set(parents.map((parent) => parent.id as string))));
+            });
           },
           { response: t.Array(AccountView), detail: { summary: "Chart of accounts of the active organization" } },
         )
@@ -59,14 +94,14 @@ export function createApp(context: AccountsContext) {
           async ({ principal, body, set }) => {
             const organizationId = requireOrganization(principal);
             try {
-              const [created] = await tenant(principal, async (tx) => {
+              const created = await tenant(principal, async (tx) => {
                 if (body.parentId) {
                   const [parent] = await tx.select().from(accounts).where(eq(accounts.id, body.parentId));
                   if (!parent) throw new UnprocessableError("The parent account does not exist");
                   if (parent.type !== body.type)
                     throw new UnprocessableError("A sub-account must have the type of its parent");
                 }
-                return tx
+                const [row] = await tx
                   .insert(accounts)
                   .values({
                     organizationId,
@@ -76,9 +111,10 @@ export function createApp(context: AccountsContext) {
                     parentId: body.parentId ?? null,
                   })
                   .returning();
+                return view(row as Account, new Set());
               });
               set.status = 201;
-              return view(created as Account);
+              return created;
             } catch (error) {
               if (isUniqueViolation(error)) throw new ConflictError(`Account code ${body.code} already exists`);
               throw error;
@@ -98,15 +134,18 @@ export function createApp(context: AccountsContext) {
         .patch(
           "/:id",
           async ({ principal, params, body }) => {
-            const [updated] = await tenant(principal, (tx) =>
-              tx
-                .update(accounts)
-                .set({ ...body, updatedAt: new Date() })
-                .where(eq(accounts.id, params.id))
-                .returning(),
+            const [updated] = await tenant(principal, async (tx) =>
+              views(
+                tx,
+                await tx
+                  .update(accounts)
+                  .set({ ...body, updatedAt: new Date() })
+                  .where(eq(accounts.id, params.id))
+                  .returning(),
+              ),
             );
             if (!updated) throw new NotFoundError("The account does not exist");
-            return view(updated);
+            return updated;
           },
           {
             params: t.Object({ id: t.String({ format: "uuid" }) }),
@@ -143,10 +182,10 @@ export function createApp(context: AccountsContext) {
                   rows.push(row);
                 }
               }
-              return rows;
+              return views(tx, rows);
             });
             set.status = 201;
-            return created.map(view);
+            return created;
           },
           {
             response: { 201: t.Array(AccountView) },
@@ -157,24 +196,35 @@ export function createApp(context: AccountsContext) {
           "/lookup",
           async ({ principal, query }) => {
             const ids = [query.id].flat();
-            const rows = await tenant(principal, (tx) =>
-              tx
-                .select()
-                .from(accounts)
-                .where(and(inArray(accounts.id, ids))),
+            return tenant(principal, async (tx) =>
+              views(tx, await tx.select().from(accounts).where(inArray(accounts.id, ids))),
             );
-            return rows.map(view);
           },
           {
-            query: t.Object({
-              id: t.Union([
-                t.String({ format: "uuid" }),
-                t.Array(t.String({ format: "uuid" }), { minItems: 1, maxItems: 200 }),
-              ]),
-            }),
+            query: t.Object({ id: Ids }),
             response: t.Array(AccountView),
             detail: { summary: "Accounts by id, for other services" },
           },
         ),
-  );
+    )
+    .group("/internal/accounts", (internal) =>
+      internal.use(serviceAuthentication(context.verifyService, LOOKUP_CALLERS)).get(
+        "/lookup",
+        ({ query }) =>
+          withTenant(db, query.organizationId, async (tx) =>
+            views(
+              tx,
+              await tx
+                .select()
+                .from(accounts)
+                .where(inArray(accounts.id, [query.id].flat())),
+            ),
+          ),
+        {
+          query: t.Object({ organizationId: t.String({ format: "uuid" }), id: Ids }),
+          response: t.Array(AccountView),
+          detail: { summary: "Accounts of an organization by id, for other services" },
+        },
+      ),
+    );
 }

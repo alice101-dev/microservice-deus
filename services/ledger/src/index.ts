@@ -20,6 +20,7 @@ startService({
           baseUrl: context.config.ACCOUNTS_URL,
           timeoutMs: context.config.ACCOUNTS_TIMEOUT_MS,
         }),
+        context.serviceToken,
       ),
     }),
 });

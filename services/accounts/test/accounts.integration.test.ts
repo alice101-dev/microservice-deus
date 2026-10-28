@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import type { Verifier } from "@deus/auth";
+import type { ServiceVerifier, Verifier } from "@deus/auth";
 import { loadConfig } from "@deus/config";
 import { createTestDatabase } from "@deus/db/testing";
 import { createLogger } from "@deus/logger";
@@ -21,6 +21,11 @@ const verify: Verifier = async (token) => ({
   organizationId: token === "no-org" ? null : token,
   token,
 });
+
+const verifyService: ServiceVerifier = async (token) => {
+  if (!token.startsWith("svc:")) throw new Error("not a service token");
+  return { service: token.slice(4), namespace: "staging-deus" };
+};
 
 describe.skipIf(!url)("accounts against PostgreSQL", () => {
   let database: Awaited<ReturnType<typeof createTestDatabase<typeof schema>>>;
@@ -49,6 +54,7 @@ describe.skipIf(!url)("accounts against PostgreSQL", () => {
       logger: createLogger({ name: "accounts" }),
       db: database.db,
       verify,
+      verifyService,
     });
   });
   afterAll(() => database.cleanup());
@@ -56,10 +62,25 @@ describe.skipIf(!url)("accounts against PostgreSQL", () => {
   test("creates the default chart once, with its hierarchy", async () => {
     const created = await call("/defaults", ORG_A, { method: "POST" });
     expect(created.status).toBe(201);
-    const rows = (await created.json()) as Array<{ id: string; code: string; parentId: string | null }>;
+    const rows = (await created.json()) as Array<{
+      id: string;
+      code: string;
+      parentId: string | null;
+      postable: boolean;
+    }>;
     expect(rows).toHaveLength(DEFAULT_CHART.length);
     const cash = rows.find((row) => row.code === "1-1000");
     expect(cash?.parentId).toBe(rows.find((row) => row.code === "1-0000")?.id ?? "missing");
+    expect(rows.find((row) => row.code === "1-0000")?.postable).toBe(false);
+    expect(cash?.postable).toBe(true);
+    const lookup = (await (await call(`/lookup?id=${cash?.id}&id=${cash?.parentId}`, ORG_A)).json()) as Array<{
+      code: string;
+      postable: boolean;
+    }>;
+    expect(Object.fromEntries(lookup.map((row) => [row.code, row.postable]))).toEqual({
+      "1-0000": false,
+      "1-1000": true,
+    });
     expect((await call("/defaults", ORG_A, { method: "POST" })).status).toBe(409);
   });
 
@@ -107,5 +128,29 @@ describe.skipIf(!url)("accounts against PostgreSQL", () => {
   test("requires a token and an active organization", async () => {
     expect((await call("/", undefined)).status).toBe(401);
     expect((await call("/", "no-org")).status).toBe(403);
+  });
+
+  test("serves other services the accounts of the organization they name", async () => {
+    const own = (await (await call("/", ORG_A)).json()) as Array<{ id: string; code: string }>;
+    const kas = own.find((row) => row.code === "1-1000");
+    const aset = own.find((row) => row.code === "1-0000");
+    const internal = (organizationId: string, token?: string) =>
+      app.handle(
+        new Request(
+          `http://localhost/internal/accounts/lookup?organizationId=${organizationId}&id=${kas?.id}&id=${aset?.id}`,
+          token ? { headers: { authorization: `Bearer ${token}` } } : {},
+        ),
+      );
+    const found = await internal(ORG_A, "svc:ledger");
+    expect(found.status).toBe(200);
+    const rows = (await found.json()) as Array<{ code: string; postable: boolean }>;
+    expect(Object.fromEntries(rows.map((row) => [row.code, row.postable]))).toEqual({
+      "1-0000": false,
+      "1-1000": true,
+    });
+    expect(await (await internal(ORG_B, "svc:ledger")).json()).toEqual([]);
+    expect((await internal(ORG_A, "svc:notification")).status).toBe(403);
+    expect((await internal(ORG_A, ORG_A)).status).toBe(401);
+    expect((await internal(ORG_A)).status).toBe(401);
   });
 });

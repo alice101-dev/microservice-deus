@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import type { Verifier } from "@deus/auth";
+import type { ServiceVerifier, Verifier } from "@deus/auth";
 import { loadConfig } from "@deus/config";
 import { createTestDatabase } from "@deus/db/testing";
 import { createLogger } from "@deus/logger";
@@ -15,16 +15,20 @@ afterAll(() => telemetry.shutdown());
 
 const ORG_A = "00000000-0000-4000-8000-00000000000a";
 const ORG_B = "00000000-0000-4000-8000-00000000000b";
+const ORG_C = "00000000-0000-4000-8000-00000000000c";
+const ACTOR = "00000000-0000-4000-8000-000000000002";
 const CASH = "00000000-0000-4000-8000-000000000101";
 const REVENUE = "00000000-0000-4000-8000-000000000401";
 const EXPENSE = "00000000-0000-4000-8000-000000000501";
 const RETIRED = "00000000-0000-4000-8000-000000000599";
+const ASSETS = "00000000-0000-4000-8000-000000000100";
 const UNKNOWN = "00000000-0000-4000-8000-000000000999";
 const ACCOUNTS: AccountRef[] = [
-  { id: CASH, code: "1-1100", name: "Kas", type: "asset", active: true },
-  { id: REVENUE, code: "4-1000", name: "Pendapatan Jasa", type: "revenue", active: true },
-  { id: EXPENSE, code: "6-1000", name: "Beban Gaji", type: "expense", active: true },
-  { id: RETIRED, code: "6-9000", name: "Beban Lama", type: "expense", active: false },
+  { id: ASSETS, code: "1-0000", name: "Aset", type: "asset", active: true, postable: false },
+  { id: CASH, code: "1-1100", name: "Kas", type: "asset", active: true, postable: true },
+  { id: REVENUE, code: "4-1000", name: "Pendapatan Jasa", type: "revenue", active: true, postable: true },
+  { id: EXPENSE, code: "6-1000", name: "Beban Gaji", type: "expense", active: true, postable: true },
+  { id: RETIRED, code: "6-9000", name: "Beban Lama", type: "expense", active: false, postable: true },
 ];
 
 const verify: Verifier = async (token) => ({
@@ -42,10 +46,15 @@ interface JournalBody {
   lines: Array<{ lineNo: number; accountId: string; debit: string; credit: string }>;
 }
 
+const verifyService: ServiceVerifier = async (token) => {
+  if (!token.startsWith("svc:")) throw new Error("not a service token");
+  return { service: token.slice(4), namespace: "staging-deus" };
+};
+
 describe.skipIf(!url)("ledger against PostgreSQL", () => {
   let database: Awaited<ReturnType<typeof createTestDatabase<typeof schema>>>;
   let app: ReturnType<typeof createApp>;
-  const lookups: string[][] = [];
+  const lookups: Array<{ ids: string[]; organizationId: string }> = [];
   const call = (
     path: string,
     token: string | undefined,
@@ -84,8 +93,9 @@ describe.skipIf(!url)("ledger against PostgreSQL", () => {
       logger: createLogger({ name: "ledger" }),
       db: database.db,
       verify,
-      accounts: async (ids) => {
-        lookups.push(ids);
+      verifyService,
+      accounts: async (ids, organizationId) => {
+        lookups.push({ ids, organizationId });
         return ACCOUNTS.filter((account) => ids.includes(account.id));
       },
     });
@@ -132,7 +142,7 @@ describe.skipIf(!url)("ledger against PostgreSQL", () => {
     expect(badAmount.status).toBe(400);
   });
 
-  test("refuses unknown or inactive accounts", async () => {
+  test("refuses unknown, inactive and header accounts", async () => {
     const unknown = await call("/journals", ORG_A, {
       method: "POST",
       body: {
@@ -157,6 +167,19 @@ describe.skipIf(!url)("ledger against PostgreSQL", () => {
       },
     });
     expect(inactive.status).toBe(422);
+
+    const header = await call("/journals", ORG_A, {
+      method: "POST",
+      body: {
+        ...sale("5"),
+        lines: [
+          { accountId: ASSETS, debit: "5" },
+          { accountId: REVENUE, credit: "5" },
+        ],
+      },
+    });
+    expect(header.status).toBe(422);
+    expect(((await header.json()) as { errors: unknown }).errors).toEqual({ headers: [ASSETS] });
   });
 
   test("replays a request with the same Idempotency-Key and rejects a different body", async () => {
@@ -287,5 +310,47 @@ describe.skipIf(!url)("ledger against PostgreSQL", () => {
     expect(drafts.map((journal) => journal.status)).toEqual(["draft"]);
     expect((await call("/journals", "no-org")).status).toBe(403);
     expect((await call("/journals", undefined)).status).toBe(401);
+  });
+
+  test("posts journals for other services with their name as the source, idempotently", async () => {
+    const internal = (token: string | undefined, body: unknown, key?: string) =>
+      app.handle(
+        new Request("http://localhost/internal/ledger/journals", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+            ...(key ? { "idempotency-key": key } : {}),
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    const invoice = {
+      organizationId: ORG_C,
+      createdBy: ACTOR,
+      date: "2026-03-10",
+      description: "Invoice INV-0001",
+      sourceId: "inv-1",
+      lines: [
+        { accountId: CASH, debit: "110000" },
+        { accountId: REVENUE, credit: "110000" },
+      ],
+    };
+    const event = "0b6f4c1e-7c0e-4f61-9f0a-5d1a2b3c4d5e";
+    const created = await internal("svc:sales", invoice, event);
+    expect(created.status).toBe(201);
+    const journal = (await created.json()) as JournalBody & { source: string; sourceId: string };
+    expect(journal).toMatchObject({ status: "posted", source: "sales", sourceId: "inv-1", total: "110000.00" });
+    expect(lookups.at(-1)?.organizationId).toBe(ORG_C);
+
+    const again = await internal("svc:sales", invoice, event);
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as JournalBody).id).toBe(journal.id);
+
+    expect((await internal("svc:sales", invoice)).status).toBe(400);
+    expect((await internal("svc:reporting", invoice, "k-2")).status).toBe(403);
+    expect((await internal(ORG_C, invoice, "k-3")).status).toBe(401);
+    const ofC = (await (await call("/journals", ORG_C)).json()) as JournalBody[];
+    expect(ofC.map((row) => row.id)).toEqual([journal.id]);
   });
 });

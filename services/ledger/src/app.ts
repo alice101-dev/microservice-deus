@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { authentication, type Principal, requireOrganization, type Verifier } from "@deus/auth";
+import {
+  authentication,
+  requireOrganization,
+  type ServiceVerifier,
+  serviceAuthentication,
+  type Verifier,
+} from "@deus/auth";
 import type { BaseConfig } from "@deus/config";
 import { type Database, isUniqueViolation, type Transaction, withTenant } from "@deus/db";
 import { BadRequestError, ConflictError, NotFoundError, UnprocessableError } from "@deus/errors";
@@ -17,15 +23,19 @@ export interface AccountRef {
   name: string;
   type: string;
   active: boolean;
+  postable: boolean;
 }
 
-export type AccountsLookup = (ids: string[], token: string) => Promise<AccountRef[]>;
+export type AccountsLookup = (ids: string[], organizationId: string) => Promise<AccountRef[]>;
+
+export const JOURNAL_SOURCES = ["sales", "purchases", "payments", "banking", "tax"] as const;
 
 export interface LedgerContext {
   config: BaseConfig;
   logger: Logger;
   db: Database<typeof schema>;
   verify: Verifier;
+  verifyService: ServiceVerifier;
   accounts: AccountsLookup;
   readiness?: Array<() => Promise<void>>;
 }
@@ -108,19 +118,23 @@ function requestHash(value: unknown) {
 export function createApp(context: LedgerContext) {
   const { db } = context;
 
-  const assertAccounts = async (lines: readonly { accountId: string }[], principal: Principal) => {
+  const assertAccounts = async (lines: readonly { accountId: string }[], organizationId: string) => {
     const ids = [...new Set(lines.map((line) => line.accountId))];
-    const found = new Map((await context.accounts(ids, principal.token)).map((account) => [account.id, account]));
+    const found = new Map((await context.accounts(ids, organizationId)).map((account) => [account.id, account]));
     const missing = ids.filter((id) => !found.has(id));
     if (missing.length > 0) throw new UnprocessableError("Some accounts do not exist", { missing });
     const inactive = ids.filter((id) => !found.get(id)?.active);
     if (inactive.length > 0) throw new UnprocessableError("Some accounts are inactive", { inactive });
+    const headers = ids.filter((id) => found.get(id)?.postable === false);
+    if (headers.length > 0) {
+      throw new UnprocessableError("Some accounts are header accounts; post to their sub-accounts", { headers });
+    }
   };
 
   const insertJournal = async (
     tx: Tx,
     organizationId: string,
-    principal: Principal,
+    actorId: string,
     input: {
       date: string;
       description: string;
@@ -145,7 +159,7 @@ export function createApp(context: LedgerContext) {
         idempotencyKey: input.idempotencyKey ?? null,
         requestHash: input.requestHash ?? null,
         reversalOf: input.reversalOf ?? null,
-        createdBy: principal.userId,
+        createdBy: actorId,
       })
       .returning();
     const id = (journal as Journal).id;
@@ -156,81 +170,106 @@ export function createApp(context: LedgerContext) {
     return load(tx, id);
   };
 
-  return createService({ config: context.config, logger: context.logger, readiness: context.readiness }).group(
-    "/api/ledger",
-    (api) =>
+  const record = async (input: {
+    organizationId: string;
+    actorId: string;
+    key: string | null;
+    source: string;
+    sourceId: string | null;
+    date: string;
+    description: string;
+    lines: LineInput[];
+    post: boolean;
+  }) => {
+    const { organizationId, key } = input;
+    if (key !== null && (key.length === 0 || key.length > 200)) {
+      throw new BadRequestError("Idempotency-Key must be 1 to 200 characters");
+    }
+    const { lines } = normalizeLines(input.lines);
+    const hash = key
+      ? requestHash({
+          date: input.date,
+          description: input.description,
+          lines,
+          post: input.post,
+          source: input.source,
+          sourceId: input.sourceId,
+        })
+      : null;
+    const replay = async () => {
+      if (!key) return undefined;
+      return withTenant(db, organizationId, async (tx) => {
+        const [existing] = await tx.select().from(journals).where(eq(journals.idempotencyKey, key));
+        if (!existing) return undefined;
+        if (existing.requestHash !== hash) {
+          throw new UnprocessableError("The Idempotency-Key was already used for a different journal");
+        }
+        const loaded = await load(tx, existing.id);
+        return view(loaded.journal, loaded.lines);
+      });
+    };
+    const previous = await replay();
+    if (previous) return { journal: previous, replayed: true };
+    await assertAccounts(lines, organizationId);
+    try {
+      const created = await withTenant(db, organizationId, (tx) =>
+        insertJournal(tx, organizationId, input.actorId, {
+          date: input.date,
+          description: input.description,
+          lines,
+          post: input.post,
+          source: input.source,
+          sourceId: input.sourceId,
+          idempotencyKey: key,
+          requestHash: hash,
+        }),
+      );
+      return { journal: view(created.journal, created.lines), replayed: false };
+    } catch (error) {
+      if (key && isUniqueViolation(error)) {
+        const raced = await replay();
+        if (raced) return { journal: raced, replayed: true };
+      }
+      throw error;
+    }
+  };
+
+  const respond = (
+    result: { journal: ReturnType<typeof view>; replayed: boolean },
+    set: { status?: number | string; headers: Record<string, unknown> },
+  ) => {
+    if (result.replayed) set.headers["idempotent-replayed"] = "true";
+    else set.status = 201;
+    return result.journal;
+  };
+
+  return createService({ config: context.config, logger: context.logger, readiness: context.readiness })
+    .group("/api/ledger", (api) =>
       api
         .use(authentication(context.verify))
         .post(
           "/journals",
-          async ({ principal, body, headers, set }) => {
-            const organizationId = requireOrganization(principal);
-            const key = headers["idempotency-key"] ?? null;
-            if (key !== null && (key.length === 0 || key.length > 200)) {
-              throw new BadRequestError("Idempotency-Key must be 1 to 200 characters");
-            }
-            const { lines } = normalizeLines(body.lines as LineInput[]);
-            const post = body.post ?? true;
-            const hash = key
-              ? requestHash({
-                  date: body.date,
-                  description: body.description,
-                  lines,
-                  post,
-                  sourceId: body.sourceId ?? null,
-                })
-              : null;
-            const replay = async () => {
-              if (!key) return undefined;
-              return withTenant(db, organizationId, async (tx) => {
-                const [existing] = await tx.select().from(journals).where(eq(journals.idempotencyKey, key));
-                if (!existing) return undefined;
-                if (existing.requestHash !== hash) {
-                  throw new UnprocessableError("The Idempotency-Key was already used for a different journal");
-                }
-                const loaded = await load(tx, existing.id);
-                return view(loaded.journal, loaded.lines);
-              });
-            };
-            const previous = await replay();
-            if (previous) {
-              set.headers["idempotent-replayed"] = "true";
-              return previous;
-            }
-            await assertAccounts(lines, principal);
-            try {
-              const created = await withTenant(db, organizationId, (tx) =>
-                insertJournal(tx, organizationId, principal, {
-                  date: body.date,
-                  description: body.description,
-                  lines,
-                  post,
-                  source: body.source,
-                  sourceId: body.sourceId ?? null,
-                  idempotencyKey: key,
-                  requestHash: hash,
-                }),
-              );
-              set.status = 201;
-              return view(created.journal, created.lines);
-            } catch (error) {
-              if (key && isUniqueViolation(error)) {
-                const raced = await replay();
-                if (raced) {
-                  set.headers["idempotent-replayed"] = "true";
-                  return raced;
-                }
-              }
-              throw error;
-            }
-          },
+          async ({ principal, body, headers, set }) =>
+            respond(
+              await record({
+                organizationId: requireOrganization(principal),
+                actorId: principal.userId,
+                key: headers["idempotency-key"] ?? null,
+                source: "manual",
+                sourceId: body.sourceId ?? null,
+                date: body.date,
+                description: body.description,
+                lines: body.lines as LineInput[],
+                post: body.post ?? true,
+              }),
+              set,
+            ),
           {
             body: t.Object({
               date: t.String({ format: "date" }),
               description: t.String({ minLength: 1, maxLength: 500 }),
               lines: t.Array(LineBody, { minItems: 2, maxItems: 500 }),
               post: t.Optional(t.Boolean()),
-              source: t.Optional(t.String({ minLength: 1, maxLength: 40 })),
               sourceId: t.Optional(t.String({ minLength: 1, maxLength: 200 })),
             }),
             response: { 200: JournalView, 201: JournalView },
@@ -300,7 +339,7 @@ export function createApp(context: LedgerContext) {
             const organizationId = requireOrganization(principal);
             const draft = await withTenant(db, organizationId, (tx) => load(tx, params.id));
             if (draft.journal.status === "posted") throw new ConflictError("The journal is already posted");
-            await assertAccounts(draft.lines, principal);
+            await assertAccounts(draft.lines, organizationId);
             const posted = await withTenant(db, organizationId, async (tx) => {
               await assertOpen(tx, organizationId, draft.journal.entryDate);
               const [updated] = await tx
@@ -338,7 +377,7 @@ export function createApp(context: LedgerContext) {
                     credit: line.debit,
                     memo: line.memo,
                   }));
-                return insertJournal(tx, organizationId, principal, {
+                return insertJournal(tx, organizationId, principal.userId, {
                   date: body?.date ?? original.journal.entryDate,
                   description: body?.description ?? `Reversal of ${original.journal.description}`,
                   lines,
@@ -390,7 +429,7 @@ export function createApp(context: LedgerContext) {
                     (
                       await context.accounts(
                         totals.map((row) => row.accountId),
-                        principal.token,
+                        organizationId,
                       )
                     ).map((account) => [account.id, account]),
                   );
@@ -486,5 +525,40 @@ export function createApp(context: LedgerContext) {
             detail: { summary: "Close a period: journals dated in it can no longer be posted" },
           },
         ),
-  );
+    )
+    .group("/internal/ledger", (internal) =>
+      internal.use(serviceAuthentication(context.verifyService, JOURNAL_SOURCES)).post(
+        "/journals",
+        async ({ caller, body, headers, set }) => {
+          const key = headers["idempotency-key"];
+          if (!key) throw new BadRequestError("Idempotency-Key is required");
+          return respond(
+            await record({
+              organizationId: body.organizationId,
+              actorId: body.createdBy,
+              key,
+              source: caller.service,
+              sourceId: body.sourceId,
+              date: body.date,
+              description: body.description,
+              lines: body.lines as LineInput[],
+              post: true,
+            }),
+            set,
+          );
+        },
+        {
+          body: t.Object({
+            organizationId: t.String({ format: "uuid" }),
+            createdBy: t.String({ format: "uuid" }),
+            date: t.String({ format: "date" }),
+            description: t.String({ minLength: 1, maxLength: 500 }),
+            lines: t.Array(LineBody, { minItems: 2, maxItems: 500 }),
+            sourceId: t.String({ minLength: 1, maxLength: 200 }),
+          }),
+          response: { 200: JournalView, 201: JournalView },
+          detail: { summary: "Post a journal on behalf of another service (source = the calling service)" },
+        },
+      ),
+    );
 }
