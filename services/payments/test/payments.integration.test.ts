@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import type { Verifier } from "@deus/auth";
+import type { ServiceVerifier, Verifier } from "@deus/auth";
 import type {
   AccountRef,
   AllocationRequest,
@@ -86,6 +86,10 @@ const INVOICES = [
 ];
 const BILLS = [document(BILL, "BILL/2026/0001", "approved", VENDOR, "2666000.00")];
 const verify: Verifier = async (token) => ({ userId: USER, email: "user@example.com", organizationId: token, token });
+const verifyService: ServiceVerifier = async (token) => {
+  if (!token.startsWith("svc:")) throw new Error("not a service token");
+  return { service: token.slice(4), namespace: "staging-deus" };
+};
 const byIds =
   <T extends { id: string }>(rows: T[]) =>
   async (ids: string[]) =>
@@ -139,6 +143,7 @@ describe.skipIf(!url)("payments against PostgreSQL", () => {
       logger: createLogger({ name: "payments" }),
       db: database.db,
       verify,
+      verifyService,
       accounts: byIds(ACCOUNTS),
       accountsByCode: async (codes) => ACCOUNTS.filter((entry) => codes.includes(entry.code)),
       contacts: byIds(CONTACTS),
@@ -218,6 +223,14 @@ describe.skipIf(!url)("payments against PostgreSQL", () => {
       { accountId: BANK, credit: "2666000.00", memo: "PAY/2026/0001" },
     ]);
     expect(await events(TOPICS.purchasesAllocations)).toHaveLength(1);
+    const lookup = await app.handle(
+      new Request(`http://localhost/internal/payments/lookup?organizationId=${ORG}&id=${payment.id}`, {
+        headers: { authorization: "Bearer svc:banking" },
+      }),
+    );
+    expect(await lookup.json()).toEqual([
+      expect.objectContaining({ id: payment.id, kind: "disbursement", amount: "2666000.00" }),
+    ]);
   });
 
   test("voids a payment and reverses the allocations only after they were applied", async () => {

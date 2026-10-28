@@ -1,4 +1,11 @@
-import { authentication, type Principal, requireOrganization, type Verifier } from "@deus/auth";
+import {
+  authentication,
+  type Principal,
+  requireOrganization,
+  type ServiceVerifier,
+  serviceAuthentication,
+  type Verifier,
+} from "@deus/auth";
 import type { AccountRef, AccountsByCode, ContactRef, DocumentRef, JournalRequest, Lookup } from "@deus/clients";
 import type { BaseConfig } from "@deus/config";
 import { type Database, type Transaction, withTenant } from "@deus/db";
@@ -29,6 +36,8 @@ export const TOPICS = {
 } as const;
 
 type Kind = "receipt" | "disbursement";
+
+export const LOOKUP_CALLERS = ["banking", "reporting"] as const;
 
 const KINDS: Record<
   Kind,
@@ -64,6 +73,7 @@ export interface PaymentsContext {
   logger: Logger;
   db: Database<typeof schema>;
   verify: Verifier;
+  verifyService: ServiceVerifier;
   accounts: Lookup<AccountRef>;
   accountsByCode: AccountsByCode;
   contacts: Lookup<ContactRef>;
@@ -229,9 +239,8 @@ export function createApp(context: PaymentsContext) {
     return { contact, counterAccountId: counter.id, allocations };
   };
 
-  return createService({ config: context.config, logger: context.logger, readiness: context.readiness }).group(
-    "/api/payments",
-    (api) =>
+  return createService({ config: context.config, logger: context.logger, readiness: context.readiness })
+    .group("/api/payments", (api) =>
       api
         .use(authentication(context.verify))
         .post(
@@ -388,5 +397,45 @@ export function createApp(context: PaymentsContext) {
             detail: { summary: "Void a payment: its journal is reversed and the documents owe the amount again" },
           },
         ),
-  );
+    )
+    .group("/internal/payments", (internal) =>
+      internal.use(serviceAuthentication(context.verifyService, LOOKUP_CALLERS)).get(
+        "/lookup",
+        async ({ query }) =>
+          withTenant(db, query.organizationId, async (tx) => {
+            const rows = await tx
+              .select()
+              .from(payments)
+              .where(inArray(payments.id, [query.id].flat()));
+            const allocations = rows.length
+              ? await tx
+                  .select()
+                  .from(paymentAllocations)
+                  .where(
+                    inArray(
+                      paymentAllocations.paymentId,
+                      rows.map((row) => row.id),
+                    ),
+                  )
+              : [];
+            return rows.map((row) =>
+              view(
+                row,
+                allocations.filter((allocation) => allocation.paymentId === row.id),
+              ),
+            );
+          }),
+        {
+          query: t.Object({
+            organizationId: t.String({ format: "uuid" }),
+            id: t.Union([
+              t.String({ format: "uuid" }),
+              t.Array(t.String({ format: "uuid" }), { minItems: 1, maxItems: 200 }),
+            ]),
+          }),
+          response: t.Array(PaymentView),
+          detail: { summary: "Payments of an organization by id, for other services" },
+        },
+      ),
+    );
 }

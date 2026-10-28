@@ -196,3 +196,19 @@ export const balancesLookup =
       query: { organizationId, from: range.from, to: range.to, accountId: range.accountId },
       token: await serviceToken(),
     });
+
+export interface PaymentRef {
+  id: string;
+  number: string;
+  kind: "receipt" | "disbursement";
+  status: "recorded" | "void";
+  contactId: string;
+  contactName: string;
+  date: string;
+  cashAccountId: string;
+  amount: string;
+  reference: string | null;
+}
+
+export const paymentsLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<PaymentRef>(client, "/internal/payments/lookup", serviceToken);
