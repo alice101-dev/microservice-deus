@@ -6,7 +6,7 @@ import { startTestTelemetry } from "@deus/telemetry/testing";
 import { SpanKind } from "@opentelemetry/api";
 import { sql } from "drizzle-orm";
 import pg from "pg";
-import { createDatabase, createPool, operationName, withTenant } from "../src";
+import { createDatabase, createPool, operationName, readiness, withTenant } from "../src";
 import { loadMigrations, MigrationError, migrate } from "../src/migrate";
 
 const url = process.env.DATABASE_TEST_URL;
@@ -98,6 +98,9 @@ describe.skipIf(!url)("against PostgreSQL", () => {
     });
     try {
       await assertTenantIsolation(createDatabase(pool, {}));
+      await readiness(pool)();
+      const probes = spans.getFinishedSpans().filter((span) => span.attributes["db.query.text"] === "select 1");
+      expect(probes).toHaveLength(0);
     } finally {
       await pool.end();
     }

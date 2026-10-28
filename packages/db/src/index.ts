@@ -16,7 +16,7 @@ export interface DatabaseOptions {
   idleInTransactionTimeoutMs?: number;
 }
 
-const INSTRUMENTED = Symbol("deus.db.instrumented");
+const UNTRACED = Symbol("deus.db.untraced");
 
 export function operationName(text: string): string {
   const match = text.trimStart().match(/^(with\b[\s\S]*?\)\s*)?([a-z]+)/i);
@@ -35,13 +35,14 @@ interface Instruments {
   duration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"]>;
 }
 
-type Queryable = { query: (...args: unknown[]) => unknown; [INSTRUMENTED]?: boolean };
+type Query = (...args: unknown[]) => unknown;
+type Queryable = { query: Query; [UNTRACED]?: Query };
 
 function instrumentQueries(target: pg.Pool | pg.PoolClient, base: Attributes, { tracer, duration }: Instruments) {
   const tagged = target as unknown as Queryable;
-  if (tagged[INSTRUMENTED]) return;
-  tagged[INSTRUMENTED] = true;
+  if (tagged[UNTRACED]) return;
   const original = tagged.query.bind(target);
+  tagged[UNTRACED] = original;
   tagged.query = (...args: unknown[]) => {
     if (typeof args[args.length - 1] === "function") return original(...args);
     const text = queryText(args);
@@ -153,8 +154,9 @@ export function withTenant<TSchema extends Record<string, unknown>, T>(
 }
 
 export function readiness(pool: pg.Pool) {
+  const query = (pool as unknown as Queryable)[UNTRACED] ?? pool.query.bind(pool);
   return async () => {
-    await pool.query("select 1");
+    await query("select 1");
   };
 }
 
