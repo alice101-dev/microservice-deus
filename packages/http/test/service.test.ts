@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { loadConfig } from "@deus/config";
-import { ConflictError } from "@deus/errors";
+import { ConflictError, UnauthorizedError } from "@deus/errors";
 import { createLogger } from "@deus/logger";
 import { startTestTelemetry } from "@deus/telemetry/testing";
 import { SpanKind } from "@opentelemetry/api";
@@ -29,6 +29,11 @@ const app = createService({
   .post("/items", ({ body }) => ({ id: "i-1", ...body }), { body: t.Object({ name: t.String({ minLength: 1 }) }) })
   .get("/conflict", () => {
     throw new ConflictError("Journal is already posted", { journalId: "j-1" });
+  })
+  .get("/denied", () => {
+    throw new UnauthorizedError("The token is invalid", undefined, {
+      cause: new Error("signature verification failed"),
+    });
   })
   .get("/crash", () => {
     throw new Error("secret connection details");
@@ -92,6 +97,13 @@ describe("createService", () => {
     const record = logs.getFinishedLogRecords().find((entry) => entry.body === "request rejected");
     expect(record?.severityText).toBe("WARN");
     expect(record?.attributes["http.response.status_code"]).toBe(409);
+    expect(record?.attributes["exception.message"]).toBe("Journal is already posted");
+  });
+
+  test("logs why a request was rejected", async () => {
+    expect((await call("/denied")).status).toBe(401);
+    const record = logs.getFinishedLogRecords().find((entry) => entry.body === "request rejected");
+    expect(record?.attributes["exception.cause"]).toBe("Error: signature verification failed");
   });
 
   test("hides unexpected errors from the client and logs them with the stack", async () => {

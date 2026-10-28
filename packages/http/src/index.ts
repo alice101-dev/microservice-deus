@@ -94,7 +94,14 @@ export function createService(options: ServiceOptions) {
       }
       const logAttributes = { ...attributes, "http.response.status_code": body.status, "error.code": body.code };
       if (body.status >= 500) logger.error("request failed", logAttributes, error);
-      else logger.warn("request rejected", logAttributes, error instanceof AppError ? undefined : error);
+      else if (error instanceof AppError) {
+        const cause = error.cause instanceof Error ? error.cause : undefined;
+        logger.warn("request rejected", {
+          ...logAttributes,
+          "exception.message": error.message,
+          "exception.cause": cause ? `${cause.name}: ${cause.message}` : undefined,
+        });
+      } else logger.warn("request rejected", logAttributes, error);
       set.status = body.status;
       set.headers["content-type"] = "application/problem+json";
       return body;

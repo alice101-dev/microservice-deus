@@ -75,6 +75,9 @@ export function createClient(options: ClientOptions) {
           if (!response.ok) {
             const problem = (payload ?? {}) as { detail?: string; code?: string };
             if (status >= 500) span.setStatus({ code: SpanStatusCode.ERROR, message: `HTTP ${status}` });
+            if (status === 401 || status === 403) {
+              throw new UpstreamError(options.name, 502, `${options.name} refused this service (${status})`);
+            }
             if (status >= 400 && status < 500) {
               throw new AppError(
                 status,

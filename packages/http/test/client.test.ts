@@ -19,6 +19,7 @@ const server = Bun.serve({
     if (url.pathname === "/ok") return Response.json({ ok: true });
     if (url.pathname === "/conflict")
       return Response.json({ code: "conflict", detail: "already posted" }, { status: 409 });
+    if (url.pathname === "/denied") return Response.json({ code: "unauthorized" }, { status: 401 });
     if (url.pathname === "/slow") await Bun.sleep(200);
     return new Response("boom", { status: 500 });
   },
@@ -55,6 +56,11 @@ describe("createClient", () => {
     const error = await client.post("/conflict").catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(AppError);
     expect(error).toMatchObject({ status: 409, code: "conflict", message: "already posted" });
+  });
+
+  test("reports a refused service call as a gateway error, not as the caller's 401", async () => {
+    const error = await client.get("/denied").catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ status: 502, code: "upstream_failed", upstream: "accounts" });
   });
 
   test("turns upstream failures and timeouts into gateway errors", async () => {
