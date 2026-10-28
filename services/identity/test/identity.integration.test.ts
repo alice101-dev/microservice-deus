@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { createDatabase, createPool } from "@deus/db";
 import { loadMigrations, migrate } from "@deus/db/migrate";
-import { createLogger } from "@deus/logger";
+import { createLogger, type Logger } from "@deus/logger";
 import { startTestTelemetry } from "@deus/telemetry/testing";
 import { createLocalJWKSet, jwtVerify } from "jose";
 import pg from "pg";
@@ -111,6 +111,43 @@ describe.skipIf(!url)("identity against PostgreSQL", () => {
     });
     expect(protectedHeader.alg).toBe("EdDSA");
     expect(payload).toMatchObject({ email: "owner@example.com", org: organization.id });
+  });
+
+  test("logs the library error when the signing key was encrypted with another secret", async () => {
+    const errors: Array<{ message: string; error: unknown }> = [];
+    const capture: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: (message, _attributes, error) => {
+        errors.push({ message, error });
+      },
+      child: () => capture,
+    };
+    const rotated = createAuth(
+      {
+        baseURL: config.AUTH_BASE_URL,
+        secret: "another-secret-with-at-least-thirty-two-characters",
+        trustedOrigins: [],
+        issuer: config.AUTH_ISSUER,
+        logger: capture,
+      },
+      createDatabase(pool, schema),
+      schema,
+    );
+    const rotatedApp = createApp(config, capture, rotated);
+    const signUp = await rotatedApp.handle(
+      new Request(
+        "http://localhost/api/identity/auth/sign-up/email",
+        json({ email: "rotated@example.com", password: "correct horse battery", name: "Rotated" }),
+      ),
+    );
+    const cookie = (signUp.headers.getSetCookie() ?? []).map((value) => value.split(";")[0]).join("; ");
+    const response = await rotatedApp.handle(
+      new Request("http://localhost/api/identity/auth/token", { headers: { cookie } }),
+    );
+    expect(response.status).toBe(500);
+    expect(errors.some(({ error }) => error instanceof Error && error.message.includes("decrypt"))).toBe(true);
   });
 
   test("refuses /me without a session", async () => {

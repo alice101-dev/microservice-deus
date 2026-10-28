@@ -1,3 +1,4 @@
+import type { Logger } from "@deus/logger";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { jwt, organization } from "better-auth/plugins";
@@ -7,6 +8,21 @@ export interface AuthSettings {
   secret: string;
   trustedOrigins: string[];
   issuer: string;
+  logger?: Logger;
+}
+
+function authLogger(logger: Logger | undefined) {
+  if (!logger) return undefined;
+  return {
+    level: "info" as const,
+    log: (level: "debug" | "info" | "warn" | "error", message: string, ...args: unknown[]) => {
+      const error = args.find((arg) => arg instanceof Error);
+      const details = args
+        .filter((arg) => arg !== error)
+        .map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg)));
+      logger[level](message, { "auth.library": "better-auth", "auth.details": details.join(" ") || undefined }, error);
+    },
+  };
 }
 
 export const AUTH_BASE_PATH = "/api/identity/auth";
@@ -22,6 +38,7 @@ export function authOptions(settings: AuthSettings) {
     session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
     advanced: { database: { generateId: "uuid" as const }, cookiePrefix: "deus" },
     telemetry: { enabled: false },
+    logger: authLogger(settings.logger),
     plugins: [
       organization({ allowUserToCreateOrganization: true, creatorRole: "owner" }),
       jwt({

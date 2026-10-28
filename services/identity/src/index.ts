@@ -32,6 +32,7 @@ const auth = createAuth(
     secret: config.BETTER_AUTH_SECRET,
     trustedOrigins: config.AUTH_TRUSTED_ORIGINS.split(",").filter(Boolean),
     issuer: config.AUTH_ISSUER,
+    logger,
   },
   createDatabase(pool, schema),
   schema,
