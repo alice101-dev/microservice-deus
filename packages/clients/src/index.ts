@@ -212,3 +212,21 @@ export interface PaymentRef {
 
 export const paymentsLookup = (client: Client, serviceToken: ServiceToken) =>
   lookup<PaymentRef>(client, "/internal/payments/lookup", serviceToken);
+
+export interface EmailRequest {
+  organizationId: string;
+  template: "invoice.issued";
+  to: string;
+  data: Record<string, unknown>;
+}
+
+export const notificationClient = (client: Client, serviceToken: ServiceToken) => ({
+  queue: async (email: EmailRequest, idempotencyKey: string) =>
+    client.post<{ id: string }>("/internal/notification/messages", {
+      body: email,
+      idempotencyKey,
+      token: await serviceToken(),
+    }),
+});
+
+export type Notification = ReturnType<typeof notificationClient>;

@@ -59,7 +59,12 @@ const contact = (contactId: string, name: string, isCustomer: boolean): ContactR
   paymentTermsDays: 14,
   active: true,
 });
-const CONTACTS = [contact(CUSTOMER, "PT Pelanggan Setia", true), contact(VENDOR_ONLY, "CV Pemasok", false)];
+const EMAIL_CUSTOMER = id(203);
+const CONTACTS = [
+  contact(CUSTOMER, "PT Pelanggan Setia", true),
+  contact(VENDOR_ONLY, "CV Pemasok", false),
+  { ...contact(EMAIL_CUSTOMER, "PT Surel Lancar", true), email: "finance@surel.example", address: "Jl. Merdeka 1" },
+];
 const product = (productId: string, sku: string, salePrice: string, vatRate: string, revenue: string): ProductRef => ({
   id: productId,
   sku,
@@ -403,5 +408,29 @@ describe.skipIf(!url)("sales against PostgreSQL", () => {
         )
       ).status,
     ).toBe(403);
+  });
+
+  test("queues the invoice email for customers with an email address", async () => {
+    const before = (await events(TOPICS.email)).length;
+    const invoice = await json<InvoiceBody>(
+      call("/invoices", ORG_A, { method: "POST", body: draft({ contactId: EMAIL_CUSTOMER }) }),
+    );
+    const issued = await json<InvoiceBody>(call(`/invoices/${invoice.id}/issue`, ORG_A, { method: "POST" }));
+    const emails = await events(TOPICS.email);
+    expect(emails).toHaveLength(before + 1);
+    expect(emails.at(-1)?.payload).toMatchObject({
+      organizationId: ORG_A,
+      template: "invoice.issued",
+      to: "finance@surel.example",
+      data: {
+        number: issued.number,
+        customer: { name: "PT Surel Lancar", address: "Jl. Merdeka 1", taxId: null },
+        total: "2533050.00",
+        lines: [
+          { description: "Kopi Arabika 250g", quantity: "3", unitPrice: "85000.00", amount: "255000.00" },
+          { description: "Jasa Konsultasi", quantity: "1.5", unitPrice: "1500000.00", amount: "2250000.00" },
+        ],
+      },
+    });
   });
 });

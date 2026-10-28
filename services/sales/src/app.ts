@@ -28,7 +28,11 @@ import {
   type schema,
 } from "./schema";
 
-export const TOPICS = { journal: "ledger.journal", reversal: "ledger.reversal" } as const;
+export const TOPICS = {
+  journal: "ledger.journal",
+  reversal: "ledger.reversal",
+  email: "notification.invoice",
+} as const;
 export const LOOKUP_CALLERS = ["payments", "reporting", "notification"] as const;
 export const ALLOCATION_CALLERS = ["payments"] as const;
 
@@ -380,6 +384,8 @@ export function createApp(context: SalesContext) {
           async ({ principal, params }) => {
             const organizationId = requireOrganization(principal);
             const accounts = await salesAccounts(organizationId);
+            const pending = await withTenant(db, organizationId, (tx) => load(tx, params.id));
+            const [customer] = await context.contacts([pending.invoice.contactId], organizationId);
             const issued = await withTenant(db, organizationId, async (tx) => {
               const { invoice, lines } = await load(tx, params.id, true);
               if (invoice.status !== "draft") throw new ConflictError(`The invoice is already ${invoice.status}`);
@@ -396,6 +402,37 @@ export function createApp(context: SalesContext) {
                 topic: TOPICS.journal,
                 payload: invoiceJournal(updated as Invoice, lines, accounts),
               });
+              if (customer?.email) {
+                const issuedInvoice = updated as Invoice;
+                await enqueue(tx, {
+                  organizationId,
+                  topic: TOPICS.email,
+                  payload: {
+                    organizationId,
+                    template: "invoice.issued",
+                    to: customer.email,
+                    data: {
+                      invoiceId: issuedInvoice.id,
+                      number: issuedInvoice.number,
+                      issueDate: issuedInvoice.issueDate,
+                      dueDate: issuedInvoice.dueDate,
+                      customer: { name: customer.name, address: customer.address, taxId: customer.taxId },
+                      lines: [...lines]
+                        .sort((a, b) => a.lineNo - b.lineNo)
+                        .map((line) => ({
+                          description: line.description,
+                          quantity: trimQuantity(line.quantity),
+                          unitPrice: line.unitPrice,
+                          amount: line.amount,
+                        })),
+                      subtotal: issuedInvoice.subtotal,
+                      vatTotal: issuedInvoice.vatTotal,
+                      total: issuedInvoice.total,
+                      notes: issuedInvoice.notes,
+                    },
+                  },
+                });
+              }
               return { invoice: updated as Invoice, lines };
             });
             context.logger.info("invoice issued", {

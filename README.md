@@ -81,6 +81,7 @@ before the process exits; unhandled rejections are logged.
 | `reporting`    | `/api/reporting`    | income statement (laba rugi), balance sheet (neraca) with unclosed earnings, statement snapshots                                                      |
 | `tax`          | `/api/tax`          | monthly VAT return (SPT Masa PPN) from the ledger; filing posts Dr VAT output / Cr VAT input and tax payable                                          |
 | `banking`      | `/api/banking`      | bank accounts, statement import with de-duplication, matching to payments, fee postings, reconciliation                                               |
+| `notification` | `/api/notification` | email (SMTP; Mailpit in staging) with the invoice PDF, queued by other services through `/internal/notification/messages`                             |
 
 The other services call each other over HTTP with `createClient` from `@deus/http`: the client continues the trace,
 records `http.client.request.duration` and turns failures into 502 or 504.

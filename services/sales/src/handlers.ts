@@ -1,10 +1,14 @@
-import type { Ledger } from "@deus/clients";
+import type { EmailRequest, Ledger, Notification } from "@deus/clients";
 import { AppError } from "@deus/errors";
 import type { OutboxHandler } from "@deus/outbox";
 import { TOPICS } from "./app";
 
-export function salesHandlers(ledger: Ledger): Record<string, OutboxHandler> {
+export function salesHandlers(ledger: Ledger, notification?: Notification): Record<string, OutboxHandler> {
   return {
+    [TOPICS.email]: async (event) => {
+      if (!notification) throw new Error("notification is not configured");
+      await notification.queue(event.payload as EmailRequest, event.id);
+    },
     [TOPICS.journal]: async (event) => {
       await ledger.post(event.payload as Parameters<Ledger["post"]>[0], event.id);
     },

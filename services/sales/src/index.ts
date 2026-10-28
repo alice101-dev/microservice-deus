@@ -1,4 +1,11 @@
-import { accountsByCode, accountsLookup, contactsLookup, ledgerClient, productsLookup } from "@deus/clients";
+import {
+  accountsByCode,
+  accountsLookup,
+  contactsLookup,
+  ledgerClient,
+  notificationClient,
+  productsLookup,
+} from "@deus/clients";
 import { createClient } from "@deus/http";
 import { createRelay } from "@deus/outbox";
 import { startService } from "@deus/runtime";
@@ -13,6 +20,7 @@ startService({
     CONTACTS_URL: Type.String({ default: "http://contacts" }),
     PRODUCTS_URL: Type.String({ default: "http://products" }),
     LEDGER_URL: Type.String({ default: "http://ledger" }),
+    NOTIFICATION_URL: Type.String({ default: "http://notification" }),
     UPSTREAM_TIMEOUT_MS: Type.Integer({ default: 3000 }),
     RECEIVABLE_ACCOUNT_CODE: Type.String({ default: "1-1200" }),
     VAT_OUTPUT_ACCOUNT_CODE: Type.String({ default: "2-1100" }),
@@ -27,7 +35,10 @@ startService({
     const relay = createRelay({
       db: context.db,
       logger: context.logger,
-      handlers: salesHandlers(ledger),
+      handlers: salesHandlers(
+        ledger,
+        notificationClient(client("notification", config.NOTIFICATION_URL), serviceToken),
+      ),
     });
     relay.start();
     context.onShutdown(() => relay.stop());
