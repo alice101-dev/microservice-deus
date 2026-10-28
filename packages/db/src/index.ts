@@ -167,3 +167,4 @@ function pgCode(error: unknown): string | undefined {
 
 export const isUniqueViolation = (error: unknown) => pgCode(error) === "23505";
 export const isForeignKeyViolation = (error: unknown) => pgCode(error) === "23503";
+export const isCheckViolation = (error: unknown) => pgCode(error) === "23514";

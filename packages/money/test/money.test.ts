@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AmountError, fromCents, normalize, sum, toCents } from "../src";
+import { AmountError, fromCents, lineAmount, normalize, percentOf, sum, toCents } from "../src";
 
 describe("money", () => {
   test("converts decimal strings to cents without floating point", () => {
@@ -19,5 +19,24 @@ describe("money", () => {
     for (const value of ["-1", "1.234", "01", "1e3", "", " 1", "1.", "abc"]) {
       expect(() => toCents(value)).toThrow(AmountError);
     }
+  });
+});
+
+describe("line amounts and percentages", () => {
+  test("multiplies a fractional quantity by a price and rounds half up to the cent", () => {
+    expect(fromCents(lineAmount("3", "85000"))).toBe("255000.00");
+    expect(fromCents(lineAmount("1.5", "0.99"))).toBe("1.49");
+    expect(fromCents(lineAmount("0.3333", "10"))).toBe("3.33");
+    expect(fromCents(lineAmount("2.5", "0.01"))).toBe("0.03");
+    expect(() => lineAmount("1.23456", "1")).toThrow(AmountError);
+    expect(() => lineAmount("-1", "1")).toThrow(AmountError);
+  });
+
+  test("takes a percentage of an amount in cents", () => {
+    expect(fromCents(percentOf(toCents("255000"), "11"))).toBe("28050.00");
+    expect(fromCents(percentOf(toCents("1.49"), "11"))).toBe("0.16");
+    expect(fromCents(percentOf(toCents("100"), "0"))).toBe("0.00");
+    expect(fromCents(percentOf(toCents("100"), "100"))).toBe("100.00");
+    expect(() => percentOf(100n, "101")).toThrow(AmountError);
   });
 });

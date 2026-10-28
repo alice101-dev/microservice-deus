@@ -29,3 +29,26 @@ export function sum(values: readonly string[]): bigint {
 export function normalize(value: string): string {
   return fromCents(toCents(value));
 }
+
+export const QUANTITY_PATTERN = "^(0|[1-9][0-9]{0,11})(\\.[0-9]{1,4})?$";
+export const RATE_PATTERN = "^(100(\\.0{1,2})?|[0-9]{1,2}(\\.[0-9]{1,2})?)$";
+const QUANTITY = new RegExp(QUANTITY_PATTERN);
+const RATE = new RegExp(RATE_PATTERN);
+
+function scaled(value: string, pattern: RegExp, digits: number): bigint {
+  if (!pattern.test(value)) throw new AmountError(value);
+  const [units = "0", fraction = ""] = value.split(".");
+  return BigInt(units) * 10n ** BigInt(digits) + BigInt(fraction.padEnd(digits, "0"));
+}
+
+function divideHalfUp(numerator: bigint, denominator: bigint): bigint {
+  return (numerator * 2n + denominator) / (denominator * 2n);
+}
+
+export function lineAmount(quantity: string, unitPrice: string): bigint {
+  return divideHalfUp(scaled(quantity, QUANTITY, 4) * toCents(unitPrice), 10_000n);
+}
+
+export function percentOf(cents: bigint, rate: string): bigint {
+  return divideHalfUp(cents * scaled(rate, RATE, 2), 10_000n);
+}
