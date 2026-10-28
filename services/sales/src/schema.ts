@@ -81,6 +81,27 @@ export const invoiceLines = pgTable(
   ],
 ).enableRLS();
 
+export const invoicePayments = pgTable(
+  "invoice_payments",
+  {
+    id: uuid().primaryKey(),
+    invoiceId: uuid()
+      .notNull()
+      .references(() => invoices.id, { onDelete: "restrict" }),
+    organizationId: uuid().notNull(),
+    paymentId: uuid().notNull(),
+    amount: money().notNull(),
+    appliedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    reversedAt: timestamp({ withTimezone: true }),
+  },
+  (table) => [
+    index().on(table.organizationId, table.paymentId),
+    index().on(table.invoiceId),
+    check("invoice_payments_positive", sql`${table.amount} > 0`),
+    pgPolicy("invoice_payments_tenant", { for: "all", using: tenant, withCheck: tenant }),
+  ],
+).enableRLS();
+
 export const invoiceSequences = pgTable(
   "invoice_sequences",
   {
@@ -95,6 +116,6 @@ export const invoiceSequences = pgTable(
 ).enableRLS();
 
 export { outbox };
-export const schema = { invoices, invoiceLines, invoiceSequences, outbox };
+export const schema = { invoices, invoiceLines, invoicePayments, invoiceSequences, outbox };
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLine = typeof invoiceLines.$inferSelect;

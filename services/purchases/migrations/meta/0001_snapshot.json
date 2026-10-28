@@ -1,6 +1,6 @@
 {
-  "id": "4a157057-f636-4f60-bc3e-ad938bcc1e02",
-  "prevId": "9c28f34d-4ad3-4b23-b4da-48dca9ef34cc",
+  "id": "755f6fd3-2ab8-43ec-b248-c012941052bb",
+  "prevId": "3adf129a-081d-43e0-b9da-ee3f3321a403",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -132,6 +132,123 @@
         "bill_lines_positive": {
           "name": "bill_lines_positive",
           "value": "\"bill_lines\".\"quantity\" > 0 and \"bill_lines\".\"unit_price\" >= 0"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.bill_payments": {
+      "name": "bill_payments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "bill_id": {
+          "name": "bill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(20, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "applied_at": {
+          "name": "applied_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "reversed_at": {
+          "name": "reversed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "bill_payments_organization_id_payment_id_index": {
+          "name": "bill_payments_organization_id_payment_id_index",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "bill_payments_bill_id_index": {
+          "name": "bill_payments_bill_id_index",
+          "columns": [
+            {
+              "expression": "bill_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "bill_payments_bill_id_bills_id_fk": {
+          "name": "bill_payments_bill_id_bills_id_fk",
+          "tableFrom": "bill_payments",
+          "columnsFrom": ["bill_id"],
+          "tableTo": "bills",
+          "columnsTo": ["id"],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "bill_payments_tenant": {
+          "name": "bill_payments_tenant",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["public"],
+          "using": "organization_id = nullif(current_setting('app.organization_id', true), '')::uuid",
+          "withCheck": "organization_id = nullif(current_setting('app.organization_id', true), '')::uuid"
+        }
+      },
+      "checkConstraints": {
+        "bill_payments_positive": {
+          "name": "bill_payments_positive",
+          "value": "\"bill_payments\".\"amount\" > 0"
         }
       },
       "isRLSEnabled": true

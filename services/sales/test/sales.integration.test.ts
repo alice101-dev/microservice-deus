@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import type { Verifier } from "@deus/auth";
+import type { ServiceVerifier, Verifier } from "@deus/auth";
 import type { AccountRef, ContactRef, JournalRequest, Ledger, ProductRef, ReversalRequest } from "@deus/clients";
 import { loadConfig } from "@deus/config";
 import { createTestDatabase } from "@deus/db/testing";
@@ -79,6 +79,10 @@ const PRODUCTS = [
 ];
 
 const verify: Verifier = async (token) => ({ userId: USER, email: "user@example.com", organizationId: token, token });
+const verifyService: ServiceVerifier = async (token) => {
+  if (!token.startsWith("svc:")) throw new Error("not a service token");
+  return { service: token.slice(4), namespace: "staging-deus" };
+};
 const byIds =
   <T extends { id: string }>(rows: T[]) =>
   async (ids: string[]) =>
@@ -132,6 +136,7 @@ describe.skipIf(!url)("sales against PostgreSQL", () => {
       logger: createLogger({ name: "sales" }),
       db: database.db,
       verify,
+      verifyService,
       accounts: byIds(ACCOUNTS),
       accountsByCode: async (codes) => ACCOUNTS.filter((entry) => codes.includes(entry.code)),
       contacts: byIds(CONTACTS),
@@ -317,5 +322,86 @@ describe.skipIf(!url)("sales against PostgreSQL", () => {
     const ofB = await json<InvoiceBody[]>(call("/invoices", ORG_B));
     expect(ofB).toHaveLength(1);
     expect((await call(`/invoices/${issued[0]?.id}`, ORG_B)).status).toBe(404);
+  });
+
+  test("applies payment allocations once, refuses overpayment and takes them back", async () => {
+    const invoice = await json<InvoiceBody>(call("/invoices", ORG_A, { method: "POST", body: draft() }));
+    await call(`/invoices/${invoice.id}/issue`, ORG_A, { method: "POST" });
+    const internal = (path: string, body: unknown, token = "svc:payments") =>
+      app.handle(
+        new Request(`http://localhost/internal/sales${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+        }),
+      );
+    const payment = id(700);
+    const allocation = (allocationId: number, amount: string) => ({
+      id: id(allocationId),
+      documentId: invoice.id,
+      amount,
+    });
+    const first = await internal("/allocations", {
+      organizationId: ORG_A,
+      paymentId: payment,
+      allocations: [allocation(701, "1000000")],
+    });
+    expect(await first.json()).toEqual({ applied: 1 });
+    const replay = await internal("/allocations", {
+      organizationId: ORG_A,
+      paymentId: payment,
+      allocations: [allocation(701, "1000000")],
+    });
+    expect(await replay.json()).toEqual({ applied: 0 });
+    const state = async () =>
+      json<InvoiceBody & { amountPaid: string; paymentStatus: string }>(call(`/invoices/${invoice.id}`, ORG_A));
+    expect(await state()).toMatchObject({
+      amountPaid: "1000000.00",
+      amountDue: "1533050.00",
+      paymentStatus: "partial",
+    });
+
+    const over = await internal("/allocations", {
+      organizationId: ORG_A,
+      paymentId: id(710),
+      allocations: [allocation(711, "500000"), allocation(712, "1100000")],
+    });
+    expect(over.status).toBe(422);
+    expect((await state()).amountPaid).toBe("1000000.00");
+    expect(
+      (
+        await internal("/allocations", {
+          organizationId: ORG_A,
+          paymentId: id(720),
+          allocations: [allocation(721, "1533050")],
+        })
+      ).status,
+    ).toBe(200);
+    expect(await state()).toMatchObject({ amountDue: "0.00", paymentStatus: "paid" });
+
+    const lookup = await app.handle(
+      new Request(`http://localhost/internal/sales/invoices/lookup?organizationId=${ORG_A}&id=${invoice.id}`, {
+        headers: { authorization: "Bearer svc:payments" },
+      }),
+    );
+    expect(await lookup.json()).toEqual([
+      expect.objectContaining({ id: invoice.id, status: "issued", contactId: CUSTOMER, amountDue: "0.00" }),
+    ]);
+
+    const reversed = await internal("/allocations/reverse", { organizationId: ORG_A, paymentId: payment });
+    expect(await reversed.json()).toEqual({ reversed: 1 });
+    expect(
+      await (await internal("/allocations/reverse", { organizationId: ORG_A, paymentId: payment })).json(),
+    ).toEqual({ reversed: 0 });
+    expect(await state()).toMatchObject({ amountPaid: "1533050.00", paymentStatus: "partial" });
+    expect(
+      (
+        await internal(
+          "/allocations",
+          { organizationId: ORG_A, paymentId: payment, allocations: [allocation(799, "1")] },
+          "svc:reporting",
+        )
+      ).status,
+    ).toBe(403);
   });
 });

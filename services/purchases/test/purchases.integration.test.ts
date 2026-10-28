@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import type { Verifier } from "@deus/auth";
+import type { ServiceVerifier, Verifier } from "@deus/auth";
 import type { AccountRef, ContactRef, JournalRequest, ProductRef, ReversalRequest } from "@deus/clients";
 import { loadConfig } from "@deus/config";
 import { createTestDatabase } from "@deus/db/testing";
@@ -72,6 +72,10 @@ const PRODUCTS: ProductRef[] = [
   },
 ];
 const verify: Verifier = async (token) => ({ userId: USER, email: "user@example.com", organizationId: token, token });
+const verifyService: ServiceVerifier = async (token) => {
+  if (!token.startsWith("svc:")) throw new Error("not a service token");
+  return { service: token.slice(4), namespace: "staging-deus" };
+};
 const byIds =
   <T extends { id: string }>(rows: T[]) =>
   async (ids: string[]) =>
@@ -126,6 +130,7 @@ describe.skipIf(!url)("purchases against PostgreSQL", () => {
       logger: createLogger({ name: "purchases" }),
       db: database.db,
       verify,
+      verifyService,
       accounts: byIds(ACCOUNTS),
       accountsByCode: async (codes) => ACCOUNTS.filter((entry) => codes.includes(entry.code)),
       contacts: byIds(CONTACTS),
@@ -209,5 +214,40 @@ describe.skipIf(!url)("purchases against PostgreSQL", () => {
     });
     expect((await call(`/bills/${bill?.id}`, ORG_B)).status).toBe(404);
     expect(await json<BillBody[]>(call("/bills", ORG_B))).toHaveLength(1);
+  });
+
+  test("applies vendor payments to an approved bill once and takes them back", async () => {
+    const bill = await json<BillBody>(
+      call("/bills", ORG_A, { method: "POST", body: draft({ vendorReference: "PJ-9001" }) }),
+    );
+    await call(`/bills/${bill.id}/approve`, ORG_A, { method: "POST" });
+    const internal = (path: string, body: unknown, token = "svc:payments") =>
+      app.handle(
+        new Request(`http://localhost/internal/purchases${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+        }),
+      );
+    const state = async () =>
+      json<BillBody & { amountPaid: string; paymentStatus: string }>(call(`/bills/${bill.id}`, ORG_A));
+    const apply = (allocationId: number, amount: string) =>
+      internal("/allocations", {
+        organizationId: ORG_A,
+        paymentId: id(800),
+        allocations: [{ id: id(allocationId), documentId: bill.id, amount }],
+      });
+    expect(await (await apply(801, "2666000")).json()).toEqual({ applied: 1 });
+    expect(await (await apply(801, "2666000")).json()).toEqual({ applied: 0 });
+    expect(await state()).toMatchObject({ amountPaid: "2666000.00", paymentStatus: "paid" });
+    expect((await apply(802, "1")).status).toBe(422);
+    expect((await call(`/bills/${bill.id}/void`, ORG_A, { method: "POST" })).status).toBe(409);
+    expect(
+      await (await internal("/allocations/reverse", { organizationId: ORG_A, paymentId: id(800) })).json(),
+    ).toEqual({ reversed: 1 });
+    expect(await state()).toMatchObject({ amountPaid: "0.00", paymentStatus: "unpaid" });
+    expect(
+      (await internal("/allocations/reverse", { organizationId: ORG_A, paymentId: id(800) }, "svc:sales")).status,
+    ).toBe(403);
   });
 });

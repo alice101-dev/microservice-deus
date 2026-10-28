@@ -108,3 +108,44 @@ export const ledgerClient = (client: Client, serviceToken: ServiceToken): Ledger
   reverse: async (reversal) =>
     client.post("/internal/ledger/journals/reverse", { body: reversal, token: await serviceToken() }),
 });
+
+export interface DocumentRef {
+  id: string;
+  number: string | null;
+  status: string;
+  contactId: string;
+  contactName: string;
+  date: string;
+  dueDate: string;
+  total: string;
+  amountPaid: string;
+  amountDue: string;
+}
+
+export const invoicesLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<DocumentRef>(client, "/internal/sales/invoices/lookup", serviceToken);
+
+export const billsLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<DocumentRef>(client, "/internal/purchases/bills/lookup", serviceToken);
+
+export interface AllocationRequest {
+  organizationId: string;
+  paymentId: string;
+  allocations: Array<{ id: string; documentId: string; amount: string }>;
+}
+
+export interface Allocations {
+  apply(request: AllocationRequest): Promise<{ applied: number }>;
+  reverse(request: { organizationId: string; paymentId: string }): Promise<{ reversed: number }>;
+}
+
+export const allocationsClient = (
+  client: Client,
+  service: "sales" | "purchases",
+  serviceToken: ServiceToken,
+): Allocations => ({
+  apply: async (request) =>
+    client.post(`/internal/${service}/allocations`, { body: request, token: await serviceToken() }),
+  reverse: async (request) =>
+    client.post(`/internal/${service}/allocations/reverse`, { body: request, token: await serviceToken() }),
+});

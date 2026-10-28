@@ -15,6 +15,13 @@
       "when": 1793151688629,
       "tag": "0001_app_role_grants",
       "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793159835681,
+      "tag": "0002_invoice_payments",
+      "breakpoints": false
     }
   ]
 }

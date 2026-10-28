@@ -1,4 +1,11 @@
-import { authentication, type Principal, requireOrganization, type Verifier } from "@deus/auth";
+import {
+  authentication,
+  type Principal,
+  requireOrganization,
+  type ServiceVerifier,
+  serviceAuthentication,
+  type Verifier,
+} from "@deus/auth";
 import type { AccountRef, AccountsByCode, ContactRef, Lookup, ProductRef } from "@deus/clients";
 import type { BaseConfig } from "@deus/config";
 import { type Database, type Transaction, withTenant } from "@deus/db";
@@ -8,18 +15,29 @@ import { createService } from "@deus/http";
 import type { Logger } from "@deus/logger";
 import { AMOUNT_PATTERN, fromCents, QUANTITY_PATTERN, RATE_PATTERN, toCents } from "@deus/money";
 import { enqueue } from "@deus/outbox";
-import { and, desc, eq, gte, lte, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, type SQL, sql } from "drizzle-orm";
 import { t } from "elysia";
 import { invoiceJournal, type SalesAccounts } from "./journal";
-import { type Invoice, type InvoiceLine, invoiceLines, invoiceSequences, invoices, type schema } from "./schema";
+import {
+  type Invoice,
+  type InvoiceLine,
+  invoiceLines,
+  invoicePayments,
+  invoiceSequences,
+  invoices,
+  type schema,
+} from "./schema";
 
 export const TOPICS = { journal: "ledger.journal", reversal: "ledger.reversal" } as const;
+export const LOOKUP_CALLERS = ["payments", "reporting", "notification"] as const;
+export const ALLOCATION_CALLERS = ["payments"] as const;
 
 export interface SalesContext {
   config: BaseConfig;
   logger: Logger;
   db: Database<typeof schema>;
   verify: Verifier;
+  verifyService: ServiceVerifier;
   accounts: Lookup<AccountRef>;
   accountsByCode: AccountsByCode;
   contacts: Lookup<ContactRef>;
@@ -72,9 +90,45 @@ const InvoiceView = t.Object({
   total: t.String(),
   amountPaid: t.String(),
   amountDue: t.String(),
+  paymentStatus: t.Union([t.Literal("unpaid"), t.Literal("partial"), t.Literal("paid")]),
   lines: t.Array(LineView),
 });
 const IdParams = t.Object({ id: t.String({ format: "uuid" }) });
+
+function paymentStatus(total: string, paid: string) {
+  const paidCents = toCents(paid);
+  if (paidCents === 0n) return "unpaid" as const;
+  return paidCents >= toCents(total) ? ("paid" as const) : ("partial" as const);
+}
+
+const DocumentView = t.Object({
+  id: t.String(),
+  number: t.Nullable(t.String()),
+  status: t.String(),
+  contactId: t.String(),
+  contactName: t.String(),
+  date: t.String(),
+  dueDate: t.String(),
+  total: t.String(),
+  amountPaid: t.String(),
+  amountDue: t.String(),
+});
+const documentView = (invoice: Invoice) => ({
+  id: invoice.id,
+  number: invoice.number,
+  status: invoice.status,
+  contactId: invoice.contactId,
+  contactName: invoice.contactName,
+  date: invoice.issueDate,
+  dueDate: invoice.dueDate,
+  total: invoice.total,
+  amountPaid: invoice.amountPaid,
+  amountDue: fromCents(toCents(invoice.total) - toCents(invoice.amountPaid)),
+});
+const Ids = t.Union([
+  t.String({ format: "uuid" }),
+  t.Array(t.String({ format: "uuid" }), { minItems: 1, maxItems: 200 }),
+]);
 
 function view(invoice: Invoice, lines: InvoiceLine[]) {
   const due = toCents(invoice.total) - toCents(invoice.amountPaid);
@@ -92,6 +146,7 @@ function view(invoice: Invoice, lines: InvoiceLine[]) {
     total: invoice.total,
     amountPaid: invoice.amountPaid,
     amountDue: invoice.status === "void" ? "0.00" : fromCents(due),
+    paymentStatus: paymentStatus(invoice.total, invoice.amountPaid),
     lines: [...lines]
       .sort((a, b) => a.lineNo - b.lineNo)
       .map((line) => ({
@@ -192,9 +247,8 @@ export function createApp(context: SalesContext) {
     return withTenant(db, organizationId, (tx) => work(tx, organizationId));
   };
 
-  return createService({ config: context.config, logger: context.logger, readiness: context.readiness }).group(
-    "/api/sales",
-    (api) =>
+  return createService({ config: context.config, logger: context.logger, readiness: context.readiness })
+    .group("/api/sales", (api) =>
       api
         .use(authentication(context.verify))
         .post(
@@ -394,5 +448,106 @@ export function createApp(context: SalesContext) {
             detail: { summary: "Void an unpaid issued invoice; its journal is reversed on the void date" },
           },
         ),
-  );
+    )
+    .group("/internal/sales/invoices", (internal) =>
+      internal.use(serviceAuthentication(context.verifyService, LOOKUP_CALLERS)).get(
+        "/lookup",
+        async ({ query }) => {
+          const rows = await withTenant(db, query.organizationId, (tx) =>
+            tx
+              .select()
+              .from(invoices)
+              .where(inArray(invoices.id, [query.id].flat())),
+          );
+          return rows.map(documentView);
+        },
+        {
+          query: t.Object({ organizationId: t.String({ format: "uuid" }), id: Ids }),
+          response: t.Array(DocumentView),
+          detail: { summary: "Invoices with their amount due, for other services" },
+        },
+      ),
+    )
+    .group("/internal/sales/allocations", (internal) =>
+      internal
+        .use(serviceAuthentication(context.verifyService, ALLOCATION_CALLERS))
+        .post(
+          "/",
+          async ({ body }) =>
+            withTenant(db, body.organizationId, async (tx) => {
+              let applied = 0;
+              for (const allocation of body.allocations) {
+                const [inserted] = await tx
+                  .insert(invoicePayments)
+                  .values({
+                    id: allocation.id,
+                    invoiceId: allocation.documentId,
+                    organizationId: body.organizationId,
+                    paymentId: body.paymentId,
+                    amount: allocation.amount,
+                  })
+                  .onConflictDoNothing({ target: invoicePayments.id })
+                  .returning({ id: invoicePayments.id });
+                if (!inserted) continue;
+                const [updated] = await tx
+                  .update(invoices)
+                  .set({ amountPaid: sql`${invoices.amountPaid} + ${allocation.amount}`, updatedAt: new Date() })
+                  .where(
+                    and(
+                      eq(invoices.id, allocation.documentId),
+                      eq(invoices.status, "issued"),
+                      sql`${invoices.amountPaid} + ${allocation.amount} <= ${invoices.total}`,
+                    ),
+                  )
+                  .returning({ id: invoices.id });
+                if (!updated) {
+                  throw new UnprocessableError("The allocation exceeds the amount due or the invoice is not issued", {
+                    invoiceId: allocation.documentId,
+                  });
+                }
+                applied++;
+              }
+              return { applied };
+            }),
+          {
+            body: t.Object({
+              organizationId: t.String({ format: "uuid" }),
+              paymentId: t.String({ format: "uuid" }),
+              allocations: t.Array(
+                t.Object({
+                  id: t.String({ format: "uuid" }),
+                  documentId: t.String({ format: "uuid" }),
+                  amount: t.String({ pattern: AMOUNT_PATTERN }),
+                }),
+                { minItems: 1, maxItems: 200 },
+              ),
+            }),
+            response: t.Object({ applied: t.Integer() }),
+            detail: { summary: "Apply payment allocations to invoices, once per allocation id" },
+          },
+        )
+        .post(
+          "/reverse",
+          async ({ body }) =>
+            withTenant(db, body.organizationId, async (tx) => {
+              const reversed = await tx
+                .update(invoicePayments)
+                .set({ reversedAt: new Date() })
+                .where(and(eq(invoicePayments.paymentId, body.paymentId), isNull(invoicePayments.reversedAt)))
+                .returning({ invoiceId: invoicePayments.invoiceId, amount: invoicePayments.amount });
+              for (const allocation of reversed) {
+                await tx
+                  .update(invoices)
+                  .set({ amountPaid: sql`${invoices.amountPaid} - ${allocation.amount}`, updatedAt: new Date() })
+                  .where(eq(invoices.id, allocation.invoiceId));
+              }
+              return { reversed: reversed.length };
+            }),
+          {
+            body: t.Object({ organizationId: t.String({ format: "uuid" }), paymentId: t.String({ format: "uuid" }) }),
+            response: t.Object({ reversed: t.Integer() }),
+            detail: { summary: "Take back the allocations of a voided payment" },
+          },
+        ),
+    );
 }

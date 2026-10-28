@@ -85,6 +85,27 @@ export const billLines = pgTable(
   ],
 ).enableRLS();
 
+export const billPayments = pgTable(
+  "bill_payments",
+  {
+    id: uuid().primaryKey(),
+    billId: uuid()
+      .notNull()
+      .references(() => bills.id, { onDelete: "restrict" }),
+    organizationId: uuid().notNull(),
+    paymentId: uuid().notNull(),
+    amount: money().notNull(),
+    appliedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    reversedAt: timestamp({ withTimezone: true }),
+  },
+  (table) => [
+    index().on(table.organizationId, table.paymentId),
+    index().on(table.billId),
+    check("bill_payments_positive", sql`${table.amount} > 0`),
+    pgPolicy("bill_payments_tenant", { for: "all", using: tenant, withCheck: tenant }),
+  ],
+).enableRLS();
+
 export const billSequences = pgTable(
   "bill_sequences",
   {
@@ -99,6 +120,6 @@ export const billSequences = pgTable(
 ).enableRLS();
 
 export { outbox };
-export const schema = { bills, billLines, billSequences, outbox };
+export const schema = { bills, billLines, billPayments, billSequences, outbox };
 export type Bill = typeof bills.$inferSelect;
 export type BillLine = typeof billLines.$inferSelect;
