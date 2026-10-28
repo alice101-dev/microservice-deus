@@ -8,7 +8,7 @@ SERVICES ?= $(notdir $(wildcard services/*))
 APPS ?= $(SERVICES) web
 PLATFORM ?= linux/amd64
 
-.PHONY: install check lint typecheck test test-integration web chart auth build release
+.PHONY: install check lint typecheck test test-integration web e2e chart auth build release
 
 install:
 	bun install --frozen-lockfile
@@ -24,6 +24,9 @@ test:
 
 web:
 	cd web && bun run check && bun run test && bun run build
+
+e2e:
+	cd web && bun run e2e
 
 test-integration:
 	@docker rm -f deus-test-postgres >/dev/null 2>&1 || true

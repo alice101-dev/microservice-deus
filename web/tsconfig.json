@@ -8,6 +8,6 @@
     "skipLibCheck": true,
     "types": ["$app/types", "bun", "@testing-library/jest-dom/vitest"]
   },
-  "include": ["src", "test", "server", "*"],
+  "include": ["src", "test", "server", "e2e", "*"],
   "exclude": ["src/service-worker"]
 }

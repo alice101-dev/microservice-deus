@@ -2,7 +2,8 @@ import { error } from "@sveltejs/kit";
 import { api, call } from "#lib/api.ts";
 import { today } from "#lib/format.ts";
 
-export async function load({ params, url }) {
+export async function load({ params, url, parent }) {
+  await parent();
   const asOf = url.searchParams.get("asOf") ?? today();
   const [bankAccounts, lines, reconciliation, accounts, payments] = await Promise.all([
     call(api.banking.accounts.get()),

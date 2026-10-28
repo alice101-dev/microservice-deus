@@ -1,7 +1,8 @@
 import { api, call } from "#lib/api.ts";
 import { currentPeriod, monthRange, today } from "#lib/format.ts";
 
-export async function load() {
+export async function load({ parent }) {
+  await parent();
   const asOf = today();
   const month = monthRange(currentPeriod());
   const [sheet, income, invoices, bills] = await Promise.all([

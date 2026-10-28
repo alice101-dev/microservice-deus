@@ -1,6 +1,7 @@
 import { api, call } from "#lib/api.ts";
 
-export async function load({ url }) {
+export async function load({ url, parent }) {
+  await parent();
   const kind: "receipt" | "disbursement" = url.searchParams.get("kind") === "disbursement" ? "disbursement" : "receipt";
   const document = url.searchParams.get("document");
   const [contacts, accounts, invoices, bills] = await Promise.all([

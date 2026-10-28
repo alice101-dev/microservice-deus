@@ -1,6 +1,7 @@
 import { api, call } from "#lib/api.ts";
 
-export async function load() {
+export async function load({ parent }) {
+  await parent();
   const [products, accounts] = await Promise.all([call(api.products.get({ query: {} })), call(api.accounts.get())]);
   return { products, accounts };
 }

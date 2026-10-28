@@ -1,6 +1,7 @@
 import { api, call } from "#lib/api.ts";
 
-export async function load({ url }) {
+export async function load({ url, parent }) {
+  await parent();
   const kind = url.searchParams.get("kind");
   const filter = kind === "receipt" || kind === "disbursement" ? kind : undefined;
   const payments = await call(api.payments.get({ query: filter ? { kind: filter } : {} }));

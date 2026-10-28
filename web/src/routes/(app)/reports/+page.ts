@@ -1,7 +1,8 @@
 import { api, call } from "#lib/api.ts";
 import { currentPeriod, monthRange, today } from "#lib/format.ts";
 
-export async function load({ url }) {
+export async function load({ url, parent }) {
+  await parent();
   const month = monthRange(currentPeriod());
   const from = url.searchParams.get("from") ?? month.from;
   const to = url.searchParams.get("to") ?? today();
