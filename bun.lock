@@ -55,6 +55,15 @@
         "drizzle-kit": "0.31.11",
       },
     },
+    "packages/documents": {
+      "name": "@deus/documents",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/clients": "workspace:*",
+        "@deus/errors": "workspace:*",
+        "@deus/money": "workspace:*",
+      },
+    },
     "packages/errors": {
       "name": "@deus/errors",
       "version": "0.0.0",
@@ -272,6 +281,7 @@
         "@deus/auth": "workspace:*",
         "@deus/clients": "workspace:*",
         "@deus/db": "workspace:*",
+        "@deus/documents": "workspace:*",
         "@deus/errors": "workspace:*",
         "@deus/http": "workspace:*",
         "@deus/money": "workspace:*",
@@ -344,6 +354,8 @@
     "@deus/contacts": ["@deus/contacts@workspace:services/contacts"],
 
     "@deus/db": ["@deus/db@workspace:packages/db"],
+
+    "@deus/documents": ["@deus/documents@workspace:packages/documents"],
 
     "@deus/errors": ["@deus/errors@workspace:packages/errors"],
 

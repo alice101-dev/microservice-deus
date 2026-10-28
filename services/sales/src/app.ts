@@ -2,6 +2,7 @@ import { authentication, type Principal, requireOrganization, type Verifier } fr
 import type { AccountRef, AccountsByCode, ContactRef, Lookup, ProductRef } from "@deus/clients";
 import type { BaseConfig } from "@deus/config";
 import { type Database, type Transaction, withTenant } from "@deus/db";
+import { addDays, lineAccountIds, priceLines, SALE_PRICING, today, trimQuantity } from "@deus/documents";
 import { ConflictError, NotFoundError, UnprocessableError } from "@deus/errors";
 import { createService } from "@deus/http";
 import type { Logger } from "@deus/logger";
@@ -10,7 +11,6 @@ import { enqueue } from "@deus/outbox";
 import { and, desc, eq, gte, lte, type SQL, sql } from "drizzle-orm";
 import { t } from "elysia";
 import { invoiceJournal, type SalesAccounts } from "./journal";
-import { type LineInput, priceLines } from "./pricing";
 import { type Invoice, type InvoiceLine, invoiceLines, invoiceSequences, invoices, type schema } from "./schema";
 
 export const TOPICS = { journal: "ledger.journal", reversal: "ledger.reversal" } as const;
@@ -76,8 +76,6 @@ const InvoiceView = t.Object({
 });
 const IdParams = t.Object({ id: t.String({ format: "uuid" }) });
 
-const trimQuantity = (value: string) => (value.includes(".") ? value.replace(/\.?0+$/, "") : value);
-
 function view(invoice: Invoice, lines: InvoiceLine[]) {
   const due = toCents(invoice.total) - toCents(invoice.amountPaid);
   return {
@@ -110,14 +108,6 @@ function view(invoice: Invoice, lines: InvoiceLine[]) {
   };
 }
 
-function addDays(isoDate: string, days: number) {
-  const value = new Date(`${isoDate}T00:00:00Z`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
-
 async function load(tx: Tx, id: string, lock = false) {
   const query = tx.select().from(invoices).where(eq(invoices.id, id));
   const [invoice] = await (lock ? query.for("update") : query);
@@ -143,7 +133,7 @@ export function createApp(context: SalesContext) {
 
   const resolveDraft = async (organizationId: string, body: typeof DraftBody.static) => {
     const [contact] = await context.contacts([body.contactId], organizationId);
-    if (!contact || !contact.active || !contact.isCustomer) {
+    if (!contact?.active || !contact.isCustomer) {
       throw new UnprocessableError("The contact must be an active customer", { contactId: body.contactId });
     }
     const productIds = body.lines.flatMap((line) => (line.productId ? [line.productId] : []));
@@ -153,17 +143,15 @@ export function createApp(context: SalesContext) {
         product,
       ]),
     );
-    const accountIds = body.lines.flatMap((line) => {
-      const id = line.revenueAccountId ?? (line.productId ? products.get(line.productId)?.revenueAccountId : undefined);
-      return id ? [id] : [];
-    });
+    const lines = body.lines.map(({ revenueAccountId, ...line }) => ({ ...line, accountId: revenueAccountId }));
+    const accountIds = lineAccountIds(lines, products, SALE_PRICING);
     const accounts = new Map(
       (accountIds.length ? await context.accounts(accountIds, organizationId) : []).map((account) => [
         account.id,
         account,
       ]),
     );
-    const priced = priceLines(body.lines as LineInput[], products, accounts);
+    const priced = priceLines(lines, products, accounts, SALE_PRICING);
     const dueDate = body.dueDate ?? addDays(body.issueDate, contact.paymentTermsDays);
     if (dueDate < body.issueDate) throw new UnprocessableError("The due date is before the issue date");
     return { contact, priced, dueDate };
@@ -174,7 +162,7 @@ export function createApp(context: SalesContext) {
     const found = await context.accountsByCode(codes, organizationId);
     const pick = (code: string, type: AccountRef["type"]) => {
       const account = found.find((entry) => entry.code === code);
-      if (!account || !account.active || !account.postable || account.type !== type) {
+      if (!account?.active || !account.postable || account.type !== type) {
         throw new UnprocessableError(`Account ${code} must exist as an active ${type} account without sub-accounts`, {
           code,
         });
@@ -192,7 +180,12 @@ export function createApp(context: SalesContext) {
     organizationId: string,
     invoiceId: string,
     lines: ReturnType<typeof priceLines>["lines"],
-  ) => tx.insert(invoiceLines).values(lines.map((line) => ({ ...line, invoiceId, organizationId })));
+  ) =>
+    tx
+      .insert(invoiceLines)
+      .values(
+        lines.map(({ accountId, ...line }) => ({ ...line, revenueAccountId: accountId, invoiceId, organizationId })),
+      );
 
   const tenant = <T>(principal: Principal, work: (tx: Tx, organizationId: string) => Promise<T>) => {
     const organizationId = requireOrganization(principal);
