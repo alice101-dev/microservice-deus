@@ -1,0 +1,15 @@
+environment: staging
+k6:
+  image:
+    repository: grafana/k6
+    tag: 2.3.0
+baseUrl: http://edge.kgateway-system.svc.cluster.local.
+authOrigin: http://localhost:8080
+telemetry:
+  endpoint: otel-collector.monitoring.svc.cluster.local.:4318
+resources:
+  requests:
+    cpu: 20m
+    memory: 96Mi
+  limits:
+    memory: 256Mi

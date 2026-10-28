@@ -25,6 +25,7 @@ microservice-deus/
 │   └── deploy/         # values.yaml and values-<env>.yaml for charts/service
 ├── web/                # SvelteKit SPA (src/), Bun static server (server/), browser journey (e2e/)
 ├── charts/service/     # one Helm chart for every service
+├── charts/traffic/     # k6 synthetic traffic (scripts/traffic.js), rates in traffic/deploy/values.yaml
 ├── Dockerfile          # bundles one service (SERVICE build argument) into a distroless Bun image
 └── Makefile
 ```
@@ -155,6 +156,24 @@ through the same gateway as the API, so the browser talks to one origin.
   browser through registration, onboarding, a customer, a product, an invoice, its payment and the reports against
   `BASE_URL` (default `http://localhost:8080`); `HEADED=1` shows the browser. SvelteKit and `svelte-check` need the
   TypeScript 6 API (`typescript`); the workspace typecheck uses TypeScript 7 (`typescript-native`).
+
+## Traffic
+
+`charts/traffic` runs k6 in the cluster (`deus-traffic`) so the dashboards, SLOs and alerts always have requests to
+measure. It calls the services through the edge gateway, like the browser does:
+
+- **setup**: registers a new user and organization, fills the profile, creates the default chart, five customers
+  (one with an email, so invoices reach the notification service), two vendors and five products.
+- **browse** (120/min): lists and reports of the day or the month, contacts, products, accounts and the profile.
+- **sell** (2/min): an invoice draft with 1–3 lines; 10% are deleted, the rest issued; 5% of those are voided,
+  65% get a full or half receipt.
+- **buy** (1/min): a vendor bill, approved, and paid in 60% of the cases.
+- **mistakes** (3/min): requests that must fail with a 4xx: an unknown invoice, an invoice for a vendor, an invalid
+  payment and a request without a token.
+
+Rates are set in `traffic/deploy/values.yaml`. k6 sends its own metrics (`k6_*`, `service.name=traffic`) to the
+collector. `make traffic` runs the same script locally for a minute against `http://localhost:8080`
+(`DURATION=5m` for longer).
 
 ## Database
 

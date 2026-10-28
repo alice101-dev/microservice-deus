@@ -79,6 +79,22 @@ describe("financial statements", () => {
     ]);
   });
 
+  test("reports an overdrawn cash account and a loss as negative amounts", () => {
+    const sheet = balanceSheet(
+      CHART,
+      [row("kas", "1000000.00", "2301400.00"), row("ap", "0.00", "300000.00")],
+      { priorYears: 0n, currentYear: -1601400n * 100n },
+      "2026-03-31",
+    );
+    expect(sheet.assets.groups.map((group) => [group.code, group.total])).toEqual([["1-0000", "-1301400.00"]]);
+    expect(sheet.equity.total).toBe("-1601400.00");
+    expect(sheet).toMatchObject({
+      totalAssets: "-1301400.00",
+      totalLiabilitiesAndEquity: "-1301400.00",
+      balanced: true,
+    });
+  });
+
   test("finds the start of the fiscal year", () => {
     expect(fiscalYearStart("2026-03-31", 1)).toBe("2026-01-01");
     expect(fiscalYearStart("2026-03-31", 4)).toBe("2025-04-01");

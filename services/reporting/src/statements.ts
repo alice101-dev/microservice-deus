@@ -63,17 +63,22 @@ export function section(
     groups.set(root.id, group);
   }
   const ordered = [...groups.values()].sort((a, b) => a.root.code.localeCompare(b.root.code));
+  let cents = 0n;
   const result: StatementGroup[] = ordered.map(({ root, lines }) => {
     const sorted = lines.sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""));
+    const total = sorted.reduce((sum, line) => sum + line.cents, 0n);
+    cents += total;
     return {
       code: root.code,
       name: root.name,
       lines: sorted.map(({ cents: _cents, ...line }) => line),
-      total: fromCents(sorted.reduce((total, line) => total + line.cents, 0n)),
+      total: fromCents(total),
     };
   });
   const additions = extra.filter((entry) => entry.cents !== 0n);
   if (additions.length > 0) {
+    const total = additions.reduce((sum, entry) => sum + entry.cents, 0n);
+    cents += total;
     result.push({
       code: "",
       name: "Laba (rugi) yang belum ditutup",
@@ -83,10 +88,9 @@ export function section(
         name: entry.name,
         amount: fromCents(entry.cents),
       })),
-      total: fromCents(additions.reduce((total, entry) => total + entry.cents, 0n)),
+      total: fromCents(total),
     });
   }
-  const cents = result.reduce((total, group) => total + toCents(group.total), 0n);
   return { section: { type, groups: result, total: fromCents(cents) }, cents };
 }
 

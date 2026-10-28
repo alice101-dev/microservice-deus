@@ -8,7 +8,7 @@ SERVICES ?= $(notdir $(wildcard services/*))
 APPS ?= $(SERVICES) web
 PLATFORM ?= linux/amd64
 
-.PHONY: install check lint typecheck test test-integration web e2e chart auth build release
+.PHONY: install check lint typecheck test test-integration web e2e traffic chart auth build release
 
 install:
 	bun install --frozen-lockfile
@@ -28,6 +28,11 @@ web:
 e2e:
 	cd web && bun run e2e
 
+traffic:
+	docker run --rm -v "$(CURDIR)/charts/traffic/scripts:/scripts:ro" -e BASE_URL=http://host.docker.internal:8080 \
+		-e AUTH_ORIGIN=http://localhost:8080 -e DURATION=$(or $(DURATION),1m) grafana/k6:2.3.0 \
+		run --no-usage-report /scripts/traffic.js
+
 test-integration:
 	@docker rm -f deus-test-postgres >/dev/null 2>&1 || true
 	docker run -d --name deus-test-postgres -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:18.6-trixie >/dev/null
@@ -43,6 +48,7 @@ chart:
 			--set image.registry=registry.invalid,image.tag=check >/dev/null || exit 1; \
 		echo "chart ok: $$s"; \
 	done
+	@helm template traffic charts/traffic -n $(ENVIRONMENT)-deus -f traffic/deploy/values.yaml >/dev/null && echo "chart ok: traffic"
 
 check: lint typecheck test web chart
 

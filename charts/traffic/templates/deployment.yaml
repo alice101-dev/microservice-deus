@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "traffic.name" . }}
+  labels:
+    {{- include "traffic.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "traffic.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "traffic.labels" . | nindent 8 }}
+      annotations:
+        checksum/script: {{ .Files.Get "scripts/traffic.js" | sha256sum | trunc 16 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 12345
+        runAsGroup: 12345
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: k6
+          image: {{ printf "%s:%s" .Values.k6.image.repository .Values.k6.image.tag }}
+          args:
+            - run
+            - --quiet
+            - --no-usage-report
+            - --summary-mode=disabled
+            - --out=opentelemetry
+            - /scripts/traffic.js
+          {{- $rate := required "ratePerMinute is required" .Values.ratePerMinute }}
+          env:
+            - name: BASE_URL
+              value: {{ .Values.baseUrl | quote }}
+            - name: AUTH_ORIGIN
+              value: {{ .Values.authOrigin | quote }}
+            - name: BROWSE_PER_MINUTE
+              value: {{ required "ratePerMinute.browse is required" $rate.browse | quote }}
+            - name: SELL_PER_MINUTE
+              value: {{ required "ratePerMinute.sell is required" $rate.sell | quote }}
+            - name: BUY_PER_MINUTE
+              value: {{ required "ratePerMinute.buy is required" $rate.buy | quote }}
+            - name: MISTAKES_PER_MINUTE
+              value: {{ required "ratePerMinute.mistakes is required" $rate.mistakes | quote }}
+            - name: K6_OTEL_SERVICE_NAME
+              value: {{ include "traffic.name" . | quote }}
+            - name: K6_OTEL_EXPORTER_PROTOCOL
+              value: http/protobuf
+            - name: K6_OTEL_HTTP_EXPORTER_ENDPOINT
+              value: {{ .Values.telemetry.endpoint | quote }}
+            - name: K6_OTEL_HTTP_EXPORTER_INSECURE
+              value: "true"
+            - name: K6_OTEL_FLUSH_INTERVAL
+              value: 30s
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: script
+          configMap:
+            name: {{ include "traffic.name" . }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

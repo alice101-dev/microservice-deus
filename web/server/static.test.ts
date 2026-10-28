@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "@deus/config";
 import { createLogger } from "@deus/logger";
+import { startTestTelemetry } from "@deus/telemetry/testing";
 import { createWebServer } from "./static.ts";
+
+const { telemetry } = startTestTelemetry("web-test");
+afterAll(() => telemetry.shutdown());
 
 let root = "";
 let app: ReturnType<typeof createWebServer>;
