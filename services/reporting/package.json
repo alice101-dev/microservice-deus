@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./app": "./src/app.ts"
+  },
   "dependencies": {
     "@deus/auth": "workspace:*",
     "@deus/clients": "workspace:*",

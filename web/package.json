@@ -1,0 +1,52 @@
+{
+  "name": "@deus/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@deus/money": "workspace:*",
+    "@elysia/eden": "1.4.10",
+    "@opentelemetry/api": "1.10.0",
+    "@opentelemetry/core": "3.0.0",
+    "@opentelemetry/exporter-logs-otlp-http": "0.300.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.300.0",
+    "@opentelemetry/instrumentation": "0.300.0",
+    "@opentelemetry/instrumentation-fetch": "0.300.0",
+    "@opentelemetry/resources": "3.0.0",
+    "@opentelemetry/sdk-logs": "3.0.0",
+    "@opentelemetry/sdk-trace": "3.0.0",
+    "better-auth": "1.7.14"
+  },
+  "devDependencies": {
+    "@deus/accounts": "workspace:*",
+    "@deus/banking": "workspace:*",
+    "@deus/contacts": "workspace:*",
+    "@deus/ledger": "workspace:*",
+    "@deus/notification": "workspace:*",
+    "@deus/organization": "workspace:*",
+    "@deus/payments": "workspace:*",
+    "@deus/products": "workspace:*",
+    "@deus/purchases": "workspace:*",
+    "@deus/reporting": "workspace:*",
+    "@deus/sales": "workspace:*",
+    "@deus/tax": "workspace:*",
+    "@sveltejs/adapter-static": "4.0.0",
+    "@sveltejs/kit": "3.1.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/svelte": "5.4.2",
+    "@testing-library/user-event": "14.6.8",
+    "elysia": "1.4.30",
+    "jsdom": "30.1.2",
+    "svelte": "5.57.2",
+    "svelte-check": "4.7.6",
+    "vite": "8.3.4",
+    "vitest": "5.0.4"
+  }
+}
