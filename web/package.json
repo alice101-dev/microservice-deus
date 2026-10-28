@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -10,7 +13,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@deus/config": "workspace:*",
+    "@deus/http": "workspace:*",
+    "@deus/logger": "workspace:*",
     "@deus/money": "workspace:*",
+    "@deus/telemetry": "workspace:*",
     "@elysia/eden": "1.4.10",
     "@opentelemetry/api": "1.10.0",
     "@opentelemetry/core": "3.0.0",
@@ -21,6 +28,7 @@
     "@opentelemetry/resources": "3.0.0",
     "@opentelemetry/sdk-logs": "3.0.0",
     "@opentelemetry/sdk-trace": "3.0.0",
+    "@sinclair/typebox": "0.34.52",
     "better-auth": "1.7.14"
   },
   "devDependencies": {

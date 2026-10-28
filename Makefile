@@ -5,9 +5,10 @@ REGION ?= asia-southeast2
 REGISTRY ?= $(REGION)-docker.pkg.dev/$(PROJECT_ID)/$(ENVIRONMENT)-deus
 TAG ?= $(shell git rev-parse --short=8 HEAD)
 SERVICES ?= $(notdir $(wildcard services/*))
+APPS ?= $(SERVICES) web
 PLATFORM ?= linux/amd64
 
-.PHONY: install check lint typecheck test test-integration chart auth build release
+.PHONY: install check lint typecheck test test-integration web chart auth build release
 
 install:
 	bun install --frozen-lockfile
@@ -21,6 +22,9 @@ typecheck:
 test:
 	bun test
 
+web:
+	cd web && bun run check && bun run test && bun run build
+
 test-integration:
 	@docker rm -f deus-test-postgres >/dev/null 2>&1 || true
 	docker run -d --name deus-test-postgres -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:18.6-trixie >/dev/null
@@ -29,14 +33,15 @@ test-integration:
 		docker rm -f deus-test-postgres >/dev/null; exit $$status
 
 chart:
-	@for s in $(SERVICES); do \
-		helm template $$s charts/service -n $(ENVIRONMENT)-deus -f services/$$s/deploy/values.yaml \
-			-f services/$$s/deploy/values-$(ENVIRONMENT).yaml \
+	@for s in $(APPS); do \
+		dir=$$( [ "$$s" = web ] && echo web || echo services/$$s ); \
+		helm template $$s charts/service -n $(ENVIRONMENT)-deus -f $$dir/deploy/values.yaml \
+			-f $$dir/deploy/values-$(ENVIRONMENT).yaml \
 			--set image.registry=registry.invalid,image.tag=check >/dev/null || exit 1; \
 		echo "chart ok: $$s"; \
 	done
 
-check: lint typecheck test chart
+check: lint typecheck test web chart
 
 auth:
 	@test -n "$(PROJECT_ID)" || { echo "PROJECT_ID is empty: cp .env.example .env"; exit 1; }
@@ -46,10 +51,12 @@ build:
 	@test -n "$(SERVICE)" || { echo "usage: make build SERVICE=<name>"; exit 1; }
 	@test -n "$(PROJECT_ID)" || { echo "PROJECT_ID is empty: cp .env.example .env"; exit 1; }
 	docker buildx build --platform $(PLATFORM) --build-arg SERVICE=$(SERVICE) \
-		-t $(REGISTRY)/$(SERVICE):$(TAG) --push .
+		--build-arg APP_VERSION=$(TAG) --build-arg APP_ENVIRONMENT=$(ENVIRONMENT) \
+		$(if $(filter web,$(SERVICE)),-f web/Dockerfile,) -t $(REGISTRY)/$(SERVICE):$(TAG) --push .
 
 release:
 	@test -z "$$(git status --porcelain)" || { echo "commit or stash your changes first: the image tag is the commit"; exit 1; }
-	@for s in $(SERVICES); do $(MAKE) --no-print-directory build SERVICE=$$s TAG=$(TAG) || exit 1; done
+	@for s in $(APPS); do $(MAKE) --no-print-directory build SERVICE=$$s TAG=$(TAG) || exit 1; done
 	@for s in $(SERVICES); do bun scripts/set-image-tag.ts services/$$s/deploy/values-$(ENVIRONMENT).yaml $(TAG); done
-	@echo "images $(TAG) pushed; commit services/*/deploy/values-$(ENVIRONMENT).yaml and push to deploy"
+	@bun scripts/set-image-tag.ts web/deploy/values-$(ENVIRONMENT).yaml $(TAG)
+	@echo "images $(TAG) pushed; commit the values-$(ENVIRONMENT).yaml files and push to deploy"

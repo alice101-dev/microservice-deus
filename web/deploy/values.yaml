@@ -1,0 +1,11 @@
+image:
+  repository: web
+route:
+  enabled: true
+  pathPrefix: /
+resources:
+  requests:
+    cpu: 10m
+    memory: 64Mi
+  limits:
+    memory: 192Mi

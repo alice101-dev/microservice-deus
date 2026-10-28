@@ -4,7 +4,7 @@ pre-commit:
     - name: secrets
       run: gitleaks git --pre-commit --staged --redact --no-banner
     - name: biome
-      glob: "*.{ts,tsx,js,json,jsonc}"
+      glob: "*.{ts,tsx,js,json,jsonc,svelte}"
       run: bunx biome check --no-errors-on-unmatched {staged_files}
     - name: migrations
       glob: "services/*/migrations/*.sql"
@@ -17,3 +17,6 @@ pre-push:
       run: bun run typecheck
     - name: test
       run: bun test
+    - name: web
+      root: web/
+      run: bun run check && bun run test

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { date, index, jsonb, pgEnum, pgPolicy, pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
+import type { balanceSheet, incomeStatement } from "./statements";
 
 export const STATEMENT_KINDS = ["income-statement", "balance-sheet"] as const;
 export const statementKind = pgEnum("statement_kind", STATEMENT_KINDS);
@@ -14,7 +15,7 @@ export const statements = pgTable(
     kind: statementKind().notNull(),
     periodFrom: date({ mode: "string" }),
     periodTo: date({ mode: "string" }).notNull(),
-    data: jsonb().notNull(),
+    data: jsonb().$type<ReturnType<typeof incomeStatement> | ReturnType<typeof balanceSheet>>().notNull(),
     createdBy: uuid().notNull(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },

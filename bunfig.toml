@@ -3,3 +3,4 @@ exact = true
 
 [test]
 coverage = false
+pathIgnorePatterns = ["web/src/**", "web/test/**"]

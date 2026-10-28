@@ -24,6 +24,42 @@ export interface ReportingContext {
 const Kind = t.Union([t.Literal("income-statement"), t.Literal("balance-sheet")]);
 const Period = t.Object({ from: t.String({ format: "date" }), to: t.String({ format: "date" }) });
 const AsOf = t.Object({ asOf: t.String({ format: "date" }) });
+const Line = t.Object({
+  accountId: t.Nullable(t.String()),
+  code: t.Nullable(t.String()),
+  name: t.String(),
+  amount: t.String(),
+});
+const Group = t.Object({ code: t.String(), name: t.String(), lines: t.Array(Line), total: t.String() });
+const Section = t.Object({
+  type: t.Union([
+    t.Literal("asset"),
+    t.Literal("liability"),
+    t.Literal("equity"),
+    t.Literal("revenue"),
+    t.Literal("expense"),
+  ]),
+  groups: t.Array(Group),
+  total: t.String(),
+});
+const IncomeStatement = t.Object({
+  kind: t.Literal("income-statement"),
+  from: t.String(),
+  to: t.String(),
+  revenue: Section,
+  expense: Section,
+  netIncome: t.String(),
+});
+const BalanceSheet = t.Object({
+  kind: t.Literal("balance-sheet"),
+  asOf: t.String(),
+  assets: Section,
+  liabilities: Section,
+  equity: Section,
+  totalAssets: t.String(),
+  totalLiabilitiesAndEquity: t.String(),
+  balanced: t.Boolean(),
+});
 const StatementSummary = t.Object({
   id: t.String(),
   kind: Kind,
@@ -76,13 +112,18 @@ export function createApp(context: ReportingContext) {
         .get(
           "/income-statement",
           ({ principal, query }) => buildIncomeStatement(requireOrganization(principal), query.from, query.to),
-          { query: Period, detail: { summary: "Revenue, expenses and net income over a period (laba rugi)" } },
+          {
+            query: Period,
+            response: IncomeStatement,
+            detail: { summary: "Revenue, expenses and net income over a period (laba rugi)" },
+          },
         )
         .get(
           "/balance-sheet",
           ({ principal, query }) => buildBalanceSheet(requireOrganization(principal), query.asOf),
           {
             query: AsOf,
+            response: BalanceSheet,
             detail: {
               summary:
                 "Assets, liabilities and equity on a date (neraca), with the earnings not yet closed into equity",
@@ -119,6 +160,9 @@ export function createApp(context: ReportingContext) {
               from: t.Optional(t.String({ format: "date" })),
               to: t.String({ format: "date" }),
             }),
+            response: {
+              201: t.Composite([StatementSummary, t.Object({ data: t.Union([IncomeStatement, BalanceSheet]) })]),
+            },
             detail: { summary: "Generate a statement and keep it as a snapshot" },
           },
         )
@@ -150,7 +194,11 @@ export function createApp(context: ReportingContext) {
             if (!row) throw new NotFoundError("The statement does not exist");
             return { ...summary(row), data: row.data };
           },
-          { params: t.Object({ id: t.String({ format: "uuid" }) }), detail: { summary: "One statement snapshot" } },
+          {
+            params: t.Object({ id: t.String({ format: "uuid" }) }),
+            response: t.Composite([StatementSummary, t.Object({ data: t.Union([IncomeStatement, BalanceSheet]) })]),
+            detail: { summary: "One statement snapshot" },
+          },
         ),
   );
 }
