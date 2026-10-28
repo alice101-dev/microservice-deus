@@ -176,7 +176,8 @@ so row level security applies to it. Set `database.enabled: true` in the service
   Argo CD PreSync Job applies them as the migrator before the new version rolls out: in file order, under an
   advisory lock, each file in its own transaction with `lock_timeout` 5s, recorded with its checksum so an applied
   file cannot change. A file with `CREATE INDEX CONCURRENTLY` must hold only that statement and runs outside a
-  transaction.
+  transaction. The Job is deleted when the sync succeeds (`HookSucceeded`); a failed Job stays for
+  inspection until the next sync replaces it (`BeforeHookCreation`). Its logs are in VictoriaLogs either way.
 - **Linting**: Squawk checks every migration before a commit (`.squawk.toml`: PostgreSQL 18, files run in a
   transaction; `require-lock-timeout` and `require-statement-timeout` are off because the runner sets both;
   `prefer-bigint-over-int` and `prefer-bigint-over-smallint` are off because identifiers are UUIDs and integer

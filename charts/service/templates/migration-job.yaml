@@ -8,11 +8,10 @@ metadata:
     app.kubernetes.io/component: migrations
   annotations:
     argocd.argoproj.io/hook: PreSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,BeforeHookCreation
 spec:
   backoffLimit: 1
   activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
-  ttlSecondsAfterFinished: 86400
   template:
     metadata:
       labels:
