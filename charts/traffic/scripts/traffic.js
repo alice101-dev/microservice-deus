@@ -131,7 +131,14 @@ function seed(credentials) {
       }).id,
   );
   const goods = products.slice(0, 3);
-  return { customers, vendors, products, goods, bank: accounts["1-1100"] };
+  const bankAccount = call("POST", "/api/banking/accounts", {
+    name: "Rekening Operasional",
+    bankName: "Bank Contoh",
+    accountNumber: "123-456-7890",
+    ledgerAccountId: accounts["1-1100"],
+    openingDate: jakarta(),
+  }).id;
+  return { customers, vendors, products, goods, bank: accounts["1-1100"], bankAccount, fees: accounts["6-9000"] };
 }
 
 export function setup() {
@@ -165,6 +172,13 @@ export function browse(data) {
     ["GET", "/api/organization/profile", "/api/organization/profile"],
     ["GET", "/api/tax/vat-returns", "/api/tax/vat-returns"],
     ["GET", "/api/notification/messages", "/api/notification/messages"],
+    ["GET", "/api/banking/accounts", "/api/banking/accounts"],
+    ["GET", `/api/banking/accounts/${data.bankAccount}/lines?status=unmatched`, "/api/banking/accounts/{id}/lines"],
+    [
+      "GET",
+      `/api/banking/accounts/${data.bankAccount}/reconciliation?asOf=${today}`,
+      "/api/banking/accounts/{id}/reconciliation",
+    ],
   ]);
   api(c, method, path, name);
 }
@@ -198,7 +212,7 @@ export function sell(data) {
   if (roll > 0.7) return;
   const total = issued.json("total");
   const amount = roll < 0.55 ? total : (Number(total) / 2).toFixed(2);
-  api(c, "POST", "/api/payments/", "/api/payments/", {
+  const payment = api(c, "POST", "/api/payments/", "/api/payments/", {
     kind: "receipt",
     contactId: issued.json("contactId"),
     date: today,
@@ -206,6 +220,7 @@ export function sell(data) {
     amount,
     allocations: [{ documentId: id, amount }],
   });
+  reconcile(data, payment);
 }
 
 export function buy(data) {
@@ -222,7 +237,7 @@ export function buy(data) {
   const approved = api(c, "POST", `/api/purchases/bills/${id}/approve`, "/api/purchases/bills/{id}/approve");
   if (approved.status >= 300 || Math.random() < 0.4) return;
   const total = approved.json("total");
-  api(c, "POST", "/api/payments/", "/api/payments/", {
+  const payment = api(c, "POST", "/api/payments/", "/api/payments/", {
     kind: "disbursement",
     contactId: approved.json("contactId"),
     date: today,
@@ -230,6 +245,49 @@ export function buy(data) {
     amount: total,
     allocations: [{ documentId: id, amount: total }],
   });
+  reconcile(data, payment);
+}
+
+function importLine(data, line) {
+  const { credentials: c, bankAccount } = data;
+  const imported = api(
+    c,
+    "POST",
+    `/api/banking/accounts/${bankAccount}/statements`,
+    "/api/banking/accounts/{id}/statements",
+    { lines: [line] },
+  );
+  if (imported.status >= 300 || imported.json("imported") === 0) return null;
+  const lines = api(
+    c,
+    "GET",
+    `/api/banking/accounts/${bankAccount}/lines?status=unmatched`,
+    "/api/banking/accounts/{id}/lines",
+  );
+  if (lines.status >= 300) return null;
+  return lines.json().find((candidate) => candidate.reference === line.reference) ?? null;
+}
+
+function reconcile(data, payment) {
+  if (payment.status >= 300 || Math.random() >= 0.7) return;
+  const { credentials: c } = data;
+  const { id, kind, amount, contactName, date } = payment.json();
+  const line = importLine(data, {
+    date,
+    description: `${kind === "receipt" ? "TRF DARI" : "TRF KE"} ${contactName.toUpperCase()}`,
+    amount: kind === "receipt" ? amount : `-${amount}`,
+    reference: id,
+  });
+  if (line) api(c, "POST", `/api/banking/lines/${line.id}/match`, "/api/banking/lines/{id}/match", { paymentId: id });
+  if (Math.random() >= 0.1) return;
+  const fee = importLine(data, {
+    date,
+    description: "BIAYA ADMINISTRASI",
+    amount: "-6500.00",
+    reference: `ADM-${Date.now()}-${__VU}`,
+  });
+  if (fee)
+    api(c, "POST", `/api/banking/lines/${fee.id}/post`, "/api/banking/lines/{id}/post", { accountId: data.fees });
 }
 
 export function mistakes(data) {
@@ -237,9 +295,9 @@ export function mistakes(data) {
   const client = http.expectedStatuses({ min: 400, max: 499 });
   const today = jakarta();
   const roll = Math.random();
-  if (roll < 0.3) {
+  if (roll < 0.25) {
     api(c, "GET", `/api/sales/invoices/${crypto.randomUUID()}`, "/api/sales/invoices/{id}", undefined, client);
-  } else if (roll < 0.55) {
+  } else if (roll < 0.45) {
     api(
       c,
       "POST",
@@ -252,7 +310,7 @@ export function mistakes(data) {
       },
       client,
     );
-  } else if (roll < 0.8) {
+  } else if (roll < 0.65) {
     api(
       c,
       "POST",
@@ -266,6 +324,15 @@ export function mistakes(data) {
         amount: "-1",
         allocations: [],
       },
+      client,
+    );
+  } else if (roll < 0.8) {
+    api(
+      c,
+      "POST",
+      `/api/banking/accounts/${data.bankAccount}/statements`,
+      "/api/banking/accounts/{id}/statements",
+      { lines: [{ date: today, description: "SALDO NOL", amount: "0.00" }] },
       client,
     );
   } else {
