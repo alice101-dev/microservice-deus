@@ -34,7 +34,6 @@ spec:
             - --quiet
             - --no-usage-report
             - --summary-mode=disabled
-            - --out=opentelemetry
             - /scripts/traffic.js
           {{- $rate := required "ratePerMinute is required" .Values.ratePerMinute }}
           env:
@@ -50,18 +49,6 @@ spec:
               value: {{ required "ratePerMinute.buy is required" $rate.buy | quote }}
             - name: MISTAKES_PER_MINUTE
               value: {{ required "ratePerMinute.mistakes is required" $rate.mistakes | quote }}
-            - name: K6_OTEL_SERVICE_NAME
-              value: {{ include "traffic.name" . | quote }}
-            - name: K6_OTEL_METRIC_PREFIX
-              value: k6_
-            - name: K6_OTEL_EXPORTER_PROTOCOL
-              value: http/protobuf
-            - name: K6_OTEL_HTTP_EXPORTER_ENDPOINT
-              value: {{ .Values.telemetry.endpoint | quote }}
-            - name: K6_OTEL_HTTP_EXPORTER_INSECURE
-              value: "true"
-            - name: K6_OTEL_FLUSH_INTERVAL
-              value: 30s
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
