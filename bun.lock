@@ -27,6 +27,13 @@
         "@deus/telemetry": "workspace:*",
       },
     },
+    "packages/clients": {
+      "name": "@deus/clients",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/http": "workspace:*",
+      },
+    },
     "packages/config": {
       "name": "@deus/config",
       "version": "0.0.0",
@@ -149,6 +156,26 @@
         "jose": "6.2.13",
       },
     },
+    "services/contacts": {
+      "name": "@deus/contacts",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/auth": "workspace:*",
+        "@deus/db": "workspace:*",
+        "@deus/errors": "workspace:*",
+        "@deus/http": "workspace:*",
+        "@deus/runtime": "workspace:*",
+        "drizzle-orm": "0.45.4",
+        "elysia": "1.4.30",
+      },
+      "devDependencies": {
+        "@deus/config": "workspace:*",
+        "@deus/logger": "workspace:*",
+        "@deus/telemetry": "workspace:*",
+        "drizzle-kit": "0.31.11",
+        "jose": "6.2.13",
+      },
+    },
     "services/identity": {
       "name": "@deus/identity",
       "version": "0.0.0",
@@ -177,6 +204,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@deus/auth": "workspace:*",
+        "@deus/clients": "workspace:*",
         "@deus/db": "workspace:*",
         "@deus/errors": "workspace:*",
         "@deus/http": "workspace:*",
@@ -203,6 +231,29 @@
         "@deus/errors": "workspace:*",
         "@deus/http": "workspace:*",
         "@deus/runtime": "workspace:*",
+        "drizzle-orm": "0.45.4",
+        "elysia": "1.4.30",
+      },
+      "devDependencies": {
+        "@deus/config": "workspace:*",
+        "@deus/logger": "workspace:*",
+        "@deus/telemetry": "workspace:*",
+        "drizzle-kit": "0.31.11",
+        "jose": "6.2.13",
+      },
+    },
+    "services/products": {
+      "name": "@deus/products",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/auth": "workspace:*",
+        "@deus/clients": "workspace:*",
+        "@deus/db": "workspace:*",
+        "@deus/errors": "workspace:*",
+        "@deus/http": "workspace:*",
+        "@deus/money": "workspace:*",
+        "@deus/runtime": "workspace:*",
+        "@sinclair/typebox": "0.34.52",
         "drizzle-orm": "0.45.4",
         "elysia": "1.4.30",
       },
@@ -262,7 +313,11 @@
 
     "@deus/auth": ["@deus/auth@workspace:packages/auth"],
 
+    "@deus/clients": ["@deus/clients@workspace:packages/clients"],
+
     "@deus/config": ["@deus/config@workspace:packages/config"],
+
+    "@deus/contacts": ["@deus/contacts@workspace:services/contacts"],
 
     "@deus/db": ["@deus/db@workspace:packages/db"],
 
@@ -281,6 +336,8 @@
     "@deus/organization": ["@deus/organization@workspace:services/organization"],
 
     "@deus/outbox": ["@deus/outbox@workspace:packages/outbox"],
+
+    "@deus/products": ["@deus/products@workspace:services/products"],
 
     "@deus/runtime": ["@deus/runtime@workspace:packages/runtime"],
 
