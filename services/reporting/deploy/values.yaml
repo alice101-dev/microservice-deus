@@ -1,0 +1,7 @@
+image:
+  repository: reporting
+route:
+  enabled: true
+  pathPrefix: /api/reporting
+database:
+  enabled: true

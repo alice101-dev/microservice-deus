@@ -78,6 +78,9 @@ before the process exits; unhandled rejections are logged.
 | `sales`        | `/api/sales`        | invoices: draft, issue (number `INV/<year>/<n>`, journal Dr receivable / Cr revenue and VAT output through the outbox), void (reversal)               |
 | `purchases`    | `/api/purchases`    | vendor bills: draft, approve (number `BILL/<year>/<n>`, journal Dr expense or inventory and VAT input / Cr payable), void                             |
 | `payments`     | `/api/payments`     | customer receipts (`RCV/...`) and vendor payments (`PAY/...`) allocated to invoices or bills; journal Dr cash / Cr receivable or Dr payable / Cr cash |
+| `reporting`    | `/api/reporting`    | income statement (laba rugi), balance sheet (neraca) with unclosed earnings, statement snapshots                                                      |
+| `tax`          | `/api/tax`          | monthly VAT return (SPT Masa PPN) from the ledger; filing posts Dr VAT output / Cr VAT input and tax payable                                          |
+| `banking`      | `/api/banking`      | bank accounts, statement import with de-duplication, matching to payments, fee postings, reconciliation                                               |
 
 The other services call each other over HTTP with `createClient` from `@deus/http`: the client continues the trace,
 records `http.client.request.duration` and turns failures into 502 or 504.

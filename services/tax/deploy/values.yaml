@@ -1,0 +1,7 @@
+image:
+  repository: tax
+route:
+  enabled: true
+  pathPrefix: /api/tax
+database:
+  enabled: true
