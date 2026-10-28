@@ -52,6 +52,8 @@ spec:
               value: {{ required "ratePerMinute.mistakes is required" $rate.mistakes | quote }}
             - name: K6_OTEL_SERVICE_NAME
               value: {{ include "traffic.name" . | quote }}
+            - name: K6_OTEL_METRIC_PREFIX
+              value: k6_
             - name: K6_OTEL_EXPORTER_PROTOCOL
               value: http/protobuf
             - name: K6_OTEL_HTTP_EXPORTER_ENDPOINT

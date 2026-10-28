@@ -171,7 +171,7 @@ measure. It calls the services through the edge gateway, like the browser does:
 - **mistakes** (3/min): requests that must fail with a 4xx: an unknown invoice, an invoice for a vendor, an invalid
   payment and a request without a token.
 
-Rates are set in `traffic/deploy/values.yaml`. k6 sends its own metrics (`k6_*`, `service.name=traffic`) to the
+Rates are set in `traffic/deploy/values.yaml`. k6 sends its own metrics (`k6_*`, `service.name=traffic`; the platform collector keeps requests, durations, failures and checks) to the
 collector. `make traffic` runs the same script locally for a minute against `http://localhost:8080`
 (`DURATION=5m` for longer).
 
