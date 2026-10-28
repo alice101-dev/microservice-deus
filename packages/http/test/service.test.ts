@@ -131,6 +131,14 @@ describe("createService", () => {
         resource.scopeMetrics.flatMap((scope) => scope.metrics.map((metric) => metric.descriptor.name)),
       );
     expect(names).toContain("http.server.request.duration");
+    const points = metrics
+      .getMetrics()
+      .flatMap((resource) => resource.scopeMetrics.flatMap((scope) => scope.metrics))
+      .filter((metric) => metric.descriptor.name === "http.server.request.duration")
+      .flatMap((metric) => metric.dataPoints.map((point) => point.attributes));
+    expect(points).toContainEqual(
+      expect.objectContaining({ "http.route": "/items/:id", "http.response.status_code": 200 }),
+    );
     expect(names).toContain("process.memory.usage");
   });
 });

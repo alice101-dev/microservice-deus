@@ -16,7 +16,15 @@
       "name": "@deus/auth",
       "version": "0.0.0",
       "dependencies": {
+        "@deus/errors": "workspace:*",
+        "elysia": "1.4.30",
         "jose": "6.2.13",
+      },
+      "devDependencies": {
+        "@deus/config": "workspace:*",
+        "@deus/http": "workspace:*",
+        "@deus/logger": "workspace:*",
+        "@deus/telemetry": "workspace:*",
       },
     },
     "packages/config": {
@@ -72,6 +80,23 @@
         "@deus/telemetry": "workspace:*",
       },
     },
+    "packages/money": {
+      "name": "@deus/money",
+      "version": "0.0.0",
+    },
+    "packages/runtime": {
+      "name": "@deus/runtime",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/auth": "workspace:*",
+        "@deus/config": "workspace:*",
+        "@deus/db": "workspace:*",
+        "@deus/http": "workspace:*",
+        "@deus/logger": "workspace:*",
+        "@deus/telemetry": "workspace:*",
+        "@sinclair/typebox": "0.34.52",
+      },
+    },
     "packages/telemetry": {
       "name": "@deus/telemetry",
       "version": "0.0.0",
@@ -87,6 +112,26 @@
         "@opentelemetry/sdk-metrics": "3.0.0",
         "@opentelemetry/sdk-trace": "3.0.0",
         "@opentelemetry/semantic-conventions": "1.43.0",
+      },
+    },
+    "services/accounts": {
+      "name": "@deus/accounts",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/auth": "workspace:*",
+        "@deus/db": "workspace:*",
+        "@deus/errors": "workspace:*",
+        "@deus/http": "workspace:*",
+        "@deus/runtime": "workspace:*",
+        "drizzle-orm": "0.45.4",
+        "elysia": "1.4.30",
+      },
+      "devDependencies": {
+        "@deus/config": "workspace:*",
+        "@deus/logger": "workspace:*",
+        "@deus/telemetry": "workspace:*",
+        "drizzle-kit": "0.31.11",
+        "jose": "6.2.13",
       },
     },
     "services/identity": {
@@ -108,6 +153,48 @@
       "devDependencies": {
         "@deus/telemetry": "workspace:*",
         "@types/pg": "8.23.1",
+        "drizzle-kit": "0.31.11",
+        "jose": "6.2.13",
+      },
+    },
+    "services/ledger": {
+      "name": "@deus/ledger",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/auth": "workspace:*",
+        "@deus/db": "workspace:*",
+        "@deus/errors": "workspace:*",
+        "@deus/http": "workspace:*",
+        "@deus/money": "workspace:*",
+        "@deus/runtime": "workspace:*",
+        "@sinclair/typebox": "0.34.52",
+        "drizzle-orm": "0.45.4",
+        "elysia": "1.4.30",
+      },
+      "devDependencies": {
+        "@deus/config": "workspace:*",
+        "@deus/logger": "workspace:*",
+        "@deus/telemetry": "workspace:*",
+        "drizzle-kit": "0.31.11",
+        "jose": "6.2.13",
+      },
+    },
+    "services/organization": {
+      "name": "@deus/organization",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/auth": "workspace:*",
+        "@deus/db": "workspace:*",
+        "@deus/errors": "workspace:*",
+        "@deus/http": "workspace:*",
+        "@deus/runtime": "workspace:*",
+        "drizzle-orm": "0.45.4",
+        "elysia": "1.4.30",
+      },
+      "devDependencies": {
+        "@deus/config": "workspace:*",
+        "@deus/logger": "workspace:*",
+        "@deus/telemetry": "workspace:*",
         "drizzle-kit": "0.31.11",
         "jose": "6.2.13",
       },
@@ -156,6 +243,8 @@
 
     "@borewit/text-codec": ["@borewit/text-codec@0.2.2", "", {}, "sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ=="],
 
+    "@deus/accounts": ["@deus/accounts@workspace:services/accounts"],
+
     "@deus/auth": ["@deus/auth@workspace:packages/auth"],
 
     "@deus/config": ["@deus/config@workspace:packages/config"],
@@ -168,7 +257,15 @@
 
     "@deus/identity": ["@deus/identity@workspace:services/identity"],
 
+    "@deus/ledger": ["@deus/ledger@workspace:services/ledger"],
+
     "@deus/logger": ["@deus/logger@workspace:packages/logger"],
+
+    "@deus/money": ["@deus/money@workspace:packages/money"],
+
+    "@deus/organization": ["@deus/organization@workspace:services/organization"],
+
+    "@deus/runtime": ["@deus/runtime@workspace:packages/runtime"],
 
     "@deus/telemetry": ["@deus/telemetry@workspace:packages/telemetry"],
 

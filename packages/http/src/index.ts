@@ -137,3 +137,5 @@ export function serve(app: Stoppable, options: ServeOptions) {
   app.listen(config.PORT);
   logger.info("listening", { "server.port": config.PORT, "service.version": config.SERVICE_VERSION });
 }
+
+export { type Client, type ClientOptions, createClient, type RequestOptions, UpstreamError } from "./client";

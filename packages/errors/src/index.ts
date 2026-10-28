@@ -76,7 +76,9 @@ const TITLES: Record<number, string> = {
   409: "Conflict",
   422: "Unprocessable Content",
   500: "Internal Server Error",
+  502: "Bad Gateway",
   503: "Service Unavailable",
+  504: "Gateway Timeout",
 };
 
 export function problem(

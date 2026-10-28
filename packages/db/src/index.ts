@@ -16,13 +16,6 @@ export interface DatabaseOptions {
   idleInTransactionTimeoutMs?: number;
 }
 
-const tracer = trace.getTracer("@deus/db");
-const meter = metrics.getMeter("@deus/db");
-const duration = meter.createHistogram("db.client.operation.duration", {
-  unit: "s",
-  description: "Duration of database client operations",
-  advice: { explicitBucketBoundaries: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10] },
-});
 const INSTRUMENTED = Symbol("deus.db.instrumented");
 
 export function operationName(text: string): string {
@@ -37,7 +30,12 @@ function queryText(args: unknown[]): string {
   return "";
 }
 
-function instrumentClient(client: pg.PoolClient, base: Attributes) {
+interface Instruments {
+  tracer: ReturnType<typeof trace.getTracer>;
+  duration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"]>;
+}
+
+function instrumentClient(client: pg.PoolClient, base: Attributes, { tracer, duration }: Instruments) {
   const tagged = client as pg.PoolClient & { [INSTRUMENTED]?: boolean };
   if (tagged[INSTRUMENTED]) return;
   tagged[INSTRUMENTED] = true;
@@ -96,7 +94,16 @@ export function createPool(options: DatabaseOptions): pg.Pool {
     "server.address": options.host,
     "server.port": options.port,
   };
-  pool.on("connect", (client) => instrumentClient(client, base));
+  const meter = metrics.getMeter("@deus/db");
+  const instruments: Instruments = {
+    tracer: trace.getTracer("@deus/db"),
+    duration: meter.createHistogram("db.client.operation.duration", {
+      unit: "s",
+      description: "Duration of database client operations",
+      advice: { explicitBucketBoundaries: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10] },
+    }),
+  };
+  pool.on("connect", (client) => instrumentClient(client, base, instruments));
   const poolName = `${options.host}/${options.database}`;
   meter
     .createObservableUpDownCounter("db.client.connection.count", {
@@ -147,3 +154,16 @@ export function readiness(pool: pg.Pool) {
     await pool.query("select 1");
   };
 }
+
+function pgCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; current && depth < 5; depth++) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+export const isUniqueViolation = (error: unknown) => pgCode(error) === "23505";
+export const isForeignKeyViolation = (error: unknown) => pgCode(error) === "23503";

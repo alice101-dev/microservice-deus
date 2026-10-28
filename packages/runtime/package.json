@@ -1,0 +1,18 @@
+{
+  "name": "@deus/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@deus/auth": "workspace:*",
+    "@deus/config": "workspace:*",
+    "@deus/db": "workspace:*",
+    "@deus/http": "workspace:*",
+    "@deus/logger": "workspace:*",
+    "@deus/telemetry": "workspace:*",
+    "@sinclair/typebox": "0.34.52"
+  }
+}
