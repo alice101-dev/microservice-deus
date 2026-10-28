@@ -67,15 +67,17 @@ before the process exits; unhandled rejections are logged.
 
 ## Services
 
-| Service        | Routes              | Owns                                                                                                                                    |
-| -------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `identity`     | `/api/identity`     | users, sessions and organizations (Better Auth); issues the JWT and serves its JWKS                                                     |
-| `organization` | `/api/organization` | the company profile of an organization: legal name, NPWP, address, currency, fiscal year                                                |
-| `accounts`     | `/api/accounts`     | the chart of accounts, with a default chart for Indonesian SMEs                                                                         |
-| `ledger`       | `/api/ledger`       | journals (draft, posted, reversal), closed periods and the trial balance                                                                |
-| `contacts`     | `/api/contacts`     | customers and vendors: NPWP, payment terms                                                                                              |
-| `products`     | `/api/products`     | goods and services: SKU, prices, VAT rate, default revenue and expense accounts                                                         |
-| `sales`        | `/api/sales`        | invoices: draft, issue (number `INV/<year>/<n>`, journal Dr receivable / Cr revenue and VAT output through the outbox), void (reversal) |
+| Service        | Routes              | Owns                                                                                                                                                  |
+| -------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity`     | `/api/identity`     | users, sessions and organizations (Better Auth); issues the JWT and serves its JWKS                                                                   |
+| `organization` | `/api/organization` | the company profile of an organization: legal name, NPWP, address, currency, fiscal year                                                              |
+| `accounts`     | `/api/accounts`     | the chart of accounts, with a default chart for Indonesian SMEs                                                                                       |
+| `ledger`       | `/api/ledger`       | journals (draft, posted, reversal), closed periods and the trial balance                                                                              |
+| `contacts`     | `/api/contacts`     | customers and vendors: NPWP, payment terms                                                                                                            |
+| `products`     | `/api/products`     | goods and services: SKU, prices, VAT rate, default revenue and expense accounts                                                                       |
+| `sales`        | `/api/sales`        | invoices: draft, issue (number `INV/<year>/<n>`, journal Dr receivable / Cr revenue and VAT output through the outbox), void (reversal)               |
+| `purchases`    | `/api/purchases`    | vendor bills: draft, approve (number `BILL/<year>/<n>`, journal Dr expense or inventory and VAT input / Cr payable), void                             |
+| `payments`     | `/api/payments`     | customer receipts (`RCV/...`) and vendor payments (`PAY/...`) allocated to invoices or bills; journal Dr cash / Cr receivable or Dr payable / Cr cash |
 
 The other services call each other over HTTP with `createClient` from `@deus/http`: the client continues the trace,
 records `http.client.request.duration` and turns failures into 502 or 504.
@@ -88,10 +90,14 @@ cluster's OIDC keys (`/openid/v1/jwks`, readable by every service account), acce
 namespace, and checks the caller against an allow-list (`serviceAuthentication` from `@deus/auth`). These endpoints
 live under `/internal/<service>`, which the gateway does not route, and take the organization explicitly:
 
-| Endpoint                         | Callers                                                     |
-| -------------------------------- | ----------------------------------------------------------- |
-| `GET /internal/accounts/lookup`  | ledger, sales, purchases, payments, banking, tax, reporting |
-| `POST /internal/ledger/journals` | sales, purchases, payments, banking, tax (journal `source`) |
+| Endpoint                                                                      | Callers                                                                                             |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `GET /internal/accounts/lookup`                                               | ledger, sales, purchases, payments, banking, tax, reporting                                         |
+| `POST /internal/ledger/journals`                                              | sales, purchases, payments, banking, tax (journal `source`)                                         |
+| `POST /internal/ledger/journals/reverse`                                      | sales, purchases, payments, banking, tax (reverses the caller's journal for a source document once) |
+| `GET /internal/contacts/lookup`, `GET /internal/products/lookup`              | sales, purchases, payments, ...                                                                     |
+| `GET /internal/sales/invoices/lookup`, `GET /internal/purchases/bills/lookup` | payments, reporting, notification                                                                   |
+| `POST /internal/{sales,purchases}/allocations[/reverse]`                      | payments (idempotent per allocation id; refuses overpayment)                                        |
 
 ## Outbox
 
@@ -119,6 +125,9 @@ the active organization) at `/api/identity/auth/token`. Every other service veri
   corrected with a reversal (`POST /journals/:id/reverse`), once per journal.
 - `POST /journals` with an `Idempotency-Key` header returns the first journal for the same key and body, and 422 for
   the same key with another body.
+- A payment is fully allocated to issued invoices or approved bills of its contact. The ledger journal and the
+  allocations travel as two outbox events; voiding a payment reverses both, and the reversal of the allocations waits
+  until they were applied.
 - Closing a period (`POST /periods/YYYY-MM/close`) stops posting into it; the close and the posts of a period take the
   same advisory lock.
 

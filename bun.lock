@@ -251,6 +251,31 @@
         "jose": "6.2.13",
       },
     },
+    "services/payments": {
+      "name": "@deus/payments",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/auth": "workspace:*",
+        "@deus/clients": "workspace:*",
+        "@deus/db": "workspace:*",
+        "@deus/documents": "workspace:*",
+        "@deus/errors": "workspace:*",
+        "@deus/http": "workspace:*",
+        "@deus/money": "workspace:*",
+        "@deus/outbox": "workspace:*",
+        "@deus/runtime": "workspace:*",
+        "@sinclair/typebox": "0.34.52",
+        "drizzle-orm": "0.45.4",
+        "elysia": "1.4.30",
+      },
+      "devDependencies": {
+        "@deus/config": "workspace:*",
+        "@deus/logger": "workspace:*",
+        "@deus/telemetry": "workspace:*",
+        "drizzle-kit": "0.31.11",
+        "jose": "6.2.13",
+      },
+    },
     "services/products": {
       "name": "@deus/products",
       "version": "0.0.0",
@@ -397,6 +422,8 @@
     "@deus/organization": ["@deus/organization@workspace:services/organization"],
 
     "@deus/outbox": ["@deus/outbox@workspace:packages/outbox"],
+
+    "@deus/payments": ["@deus/payments@workspace:services/payments"],
 
     "@deus/products": ["@deus/products@workspace:services/products"],
 
