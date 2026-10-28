@@ -25,22 +25,22 @@ async function authorized(input: RequestInfo | URL, init: RequestInit = {}, retr
   return response;
 }
 
-const fetcher = authorized as typeof fetch;
+const options = { fetcher: authorized as typeof fetch, parseDate: false };
 const origin = typeof location === "undefined" ? "http://localhost" : location.origin;
 
 export const api = {
-  organization: treaty<ReturnType<typeof OrganizationApp>>(origin, { fetcher }).api.organization,
-  accounts: treaty<ReturnType<typeof AccountsApp>>(origin, { fetcher }).api.accounts,
-  ledger: treaty<ReturnType<typeof LedgerApp>>(origin, { fetcher }).api.ledger,
-  contacts: treaty<ReturnType<typeof ContactsApp>>(origin, { fetcher }).api.contacts,
-  products: treaty<ReturnType<typeof ProductsApp>>(origin, { fetcher }).api.products,
-  sales: treaty<ReturnType<typeof SalesApp>>(origin, { fetcher }).api.sales,
-  purchases: treaty<ReturnType<typeof PurchasesApp>>(origin, { fetcher }).api.purchases,
-  payments: treaty<ReturnType<typeof PaymentsApp>>(origin, { fetcher }).api.payments,
-  reporting: treaty<ReturnType<typeof ReportingApp>>(origin, { fetcher }).api.reporting,
-  tax: treaty<ReturnType<typeof TaxApp>>(origin, { fetcher }).api.tax,
-  banking: treaty<ReturnType<typeof BankingApp>>(origin, { fetcher }).api.banking,
-  notification: treaty<ReturnType<typeof NotificationApp>>(origin, { fetcher }).api.notification,
+  organization: treaty<ReturnType<typeof OrganizationApp>>(origin, options).api.organization,
+  accounts: treaty<ReturnType<typeof AccountsApp>>(origin, options).api.accounts,
+  ledger: treaty<ReturnType<typeof LedgerApp>>(origin, options).api.ledger,
+  contacts: treaty<ReturnType<typeof ContactsApp>>(origin, options).api.contacts,
+  products: treaty<ReturnType<typeof ProductsApp>>(origin, options).api.products,
+  sales: treaty<ReturnType<typeof SalesApp>>(origin, options).api.sales,
+  purchases: treaty<ReturnType<typeof PurchasesApp>>(origin, options).api.purchases,
+  payments: treaty<ReturnType<typeof PaymentsApp>>(origin, options).api.payments,
+  reporting: treaty<ReturnType<typeof ReportingApp>>(origin, options).api.reporting,
+  tax: treaty<ReturnType<typeof TaxApp>>(origin, options).api.tax,
+  banking: treaty<ReturnType<typeof BankingApp>>(origin, options).api.banking,
+  notification: treaty<ReturnType<typeof NotificationApp>>(origin, options).api.notification,
 };
 
 interface TreatyResult<T> {

@@ -29,6 +29,10 @@ export class ApiError extends Error {
   }
 }
 
+export function isNetworkError(error: unknown) {
+  return error instanceof TypeError && /fetch|network|load failed/i.test(error.message);
+}
+
 export function messageOf(error: unknown) {
   if (error instanceof ApiError) {
     if (error.status >= 500) return "Terjadi gangguan pada server. Coba lagi beberapa saat lagi.";
@@ -37,7 +41,7 @@ export function messageOf(error: unknown) {
     }
     return error.message;
   }
-  if (error instanceof TypeError) return "Tidak dapat terhubung ke server. Periksa koneksi Anda.";
+  if (isNetworkError(error)) return "Tidak dapat terhubung ke server. Periksa koneksi Anda.";
   return "Terjadi kesalahan yang tidak terduga.";
 }
 

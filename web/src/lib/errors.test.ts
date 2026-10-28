@@ -52,6 +52,7 @@ describe("error capture", () => {
       messageOf(new ApiError(400, problem(400, { errors: [{ path: "/lines/0/quantity", message: "bad" }] }), "/x")),
     ).toBe("Data tidak valid: lines/0/quantity");
     expect(messageOf(new TypeError("Failed to fetch"))).toContain("koneksi");
+    expect(messageOf(new TypeError("e.slice is not a function"))).toBe("Terjadi kesalahan yang tidak terduga.");
   });
 
   test("call() throws an ApiError carrying the problem document", async () => {
