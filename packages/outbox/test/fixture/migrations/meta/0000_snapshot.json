@@ -1,5 +1,5 @@
 {
-  "id": "9f54036f-ade5-407c-a65a-d09c61ff6ffe",
+  "id": "0cb3bc0e-dc00-4a7b-a557-9ab53a74e226",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -90,7 +90,7 @@
           "name": "outbox_due",
           "columns": [
             {
-              "expression": "available_at",
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

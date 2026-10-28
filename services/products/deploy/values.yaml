@@ -1,0 +1,7 @@
+image:
+  repository: products
+route:
+  enabled: true
+  pathPrefix: /api/products
+database:
+  enabled: true

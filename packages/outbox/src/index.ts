@@ -22,7 +22,7 @@ export const outbox = pgTable(
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index("outbox_due").on(table.availableAt).where(sql`delivered_at is null and dead_at is null`),
+    index("outbox_due").on(table.createdAt).where(sql`delivered_at is null and dead_at is null`),
     index("outbox_delivered").on(table.deliveredAt).where(sql`delivered_at is not null`),
   ],
 );
@@ -119,12 +119,12 @@ export function createRelay(options: RelayOptions) {
         select id from outbox
         where delivered_at is null and dead_at is null and available_at <= now()
           and (lease_until is null or lease_until < now())
-        order by available_at
+        order by created_at
         limit ${batchSize}
         for update skip locked
       )
       returning id, organization_id, topic, payload, traceparent, attempts, created_at`);
-    return result.rows;
+    return result.rows.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   };
 
   const settle = async (row: ClaimedRow, error: unknown) => {

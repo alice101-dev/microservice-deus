@@ -128,6 +128,23 @@ describe.skipIf(!url)("outbox against PostgreSQL", () => {
     ]);
   });
 
+  test("delivers a batch in the order the events were written", async () => {
+    for (let n = 0; n < 10; n++) {
+      await database.db.transaction((tx) =>
+        enqueue(tx, { organizationId: ORG, topic: "invoice.issued", payload: { n } }),
+      );
+    }
+    await database.db.execute(sql`update outbox set available_at = now() - (payload->>'n')::int * interval '1 second'`);
+    const seen: number[] = [];
+    const relay = createRelay({
+      db: database.db,
+      logger,
+      handlers: { "invoice.issued": async (event) => void seen.push((event.payload as { n: number }).n) },
+    });
+    await relay.runOnce();
+    expect(seen).toEqual([...Array(10).keys()]);
+  });
+
   test("lets competing relays deliver every event exactly once", async () => {
     for (let n = 0; n < 30; n++) {
       await database.db.transaction((tx) =>

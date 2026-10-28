@@ -45,3 +45,66 @@ export const accountsLookup = (client: Client, serviceToken: ServiceToken) =>
 
 export const contactsLookup = (client: Client, serviceToken: ServiceToken) =>
   lookup<ContactRef>(client, "/internal/contacts/lookup", serviceToken);
+
+export interface ProductRef {
+  id: string;
+  sku: string;
+  name: string;
+  kind: "goods" | "service";
+  unit: string;
+  salePrice: string | null;
+  purchasePrice: string | null;
+  vatRate: string;
+  revenueAccountId: string | null;
+  expenseAccountId: string | null;
+  active: boolean;
+}
+
+export const productsLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<ProductRef>(client, "/internal/products/lookup", serviceToken);
+
+export type AccountsByCode = (codes: string[], organizationId: string) => Promise<AccountRef[]>;
+
+export const accountsByCode =
+  (client: Client, serviceToken: ServiceToken): AccountsByCode =>
+  async (codes, organizationId) =>
+    client.get<AccountRef[]>("/internal/accounts/by-code", {
+      query: { organizationId, code: [...new Set(codes)] },
+      token: await serviceToken(),
+    });
+
+export interface JournalLineInput {
+  accountId: string;
+  debit?: string;
+  credit?: string;
+  memo?: string;
+}
+
+export interface JournalRequest {
+  organizationId: string;
+  createdBy: string;
+  date: string;
+  description: string;
+  sourceId: string;
+  lines: JournalLineInput[];
+}
+
+export interface ReversalRequest {
+  organizationId: string;
+  createdBy: string;
+  sourceId: string;
+  date?: string;
+  description?: string;
+}
+
+export interface Ledger {
+  post(journal: JournalRequest, idempotencyKey: string): Promise<{ id: string }>;
+  reverse(reversal: ReversalRequest): Promise<{ id: string }>;
+}
+
+export const ledgerClient = (client: Client, serviceToken: ServiceToken): Ledger => ({
+  post: async (journal, idempotencyKey) =>
+    client.post("/internal/ledger/journals", { body: journal, idempotencyKey, token: await serviceToken() }),
+  reverse: async (reversal) =>
+    client.post("/internal/ledger/journals/reverse", { body: reversal, token: await serviceToken() }),
+});

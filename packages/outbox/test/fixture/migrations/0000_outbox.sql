@@ -13,5 +13,5 @@ CREATE TABLE "outbox" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 
-CREATE INDEX "outbox_due" ON "outbox" USING btree ("available_at") WHERE delivered_at is null and dead_at is null;
+CREATE INDEX "outbox_due" ON "outbox" USING btree ("created_at") WHERE delivered_at is null and dead_at is null;
 CREATE INDEX "outbox_delivered" ON "outbox" USING btree ("delivered_at") WHERE delivered_at is not null;

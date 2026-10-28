@@ -15,6 +15,7 @@ microservice-deus/
 │   ├── http/           # Elysia service factory (OpenAPI, tracing, errors, health, shutdown) and the HTTP client
 │   ├── db/             # PostgreSQL pool with spans and metrics, Drizzle, tenant transactions, migration runner
 │   ├── auth/           # JWT verification against the identity JWKS and the authenticated principal
+│   ├── clients/        # typed clients of the /internal endpoints of other services
 │   ├── money/          # IDR amounts as decimal strings and integer cents
 │   ├── outbox/         # transactional outbox: events written with the data, delivered at least once
 │   └── runtime/        # startService and runMigrations: config, telemetry, logger, database and verifier wiring
@@ -66,12 +67,15 @@ before the process exits; unhandled rejections are logged.
 
 ## Services
 
-| Service        | Routes              | Owns                                                                                     |
-| -------------- | ------------------- | ---------------------------------------------------------------------------------------- |
-| `identity`     | `/api/identity`     | users, sessions and organizations (Better Auth); issues the JWT and serves its JWKS      |
-| `organization` | `/api/organization` | the company profile of an organization: legal name, NPWP, address, currency, fiscal year |
-| `accounts`     | `/api/accounts`     | the chart of accounts, with a default chart for Indonesian SMEs                          |
-| `ledger`       | `/api/ledger`       | journals (draft, posted, reversal), closed periods and the trial balance                 |
+| Service        | Routes              | Owns                                                                                                                                    |
+| -------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity`     | `/api/identity`     | users, sessions and organizations (Better Auth); issues the JWT and serves its JWKS                                                     |
+| `organization` | `/api/organization` | the company profile of an organization: legal name, NPWP, address, currency, fiscal year                                                |
+| `accounts`     | `/api/accounts`     | the chart of accounts, with a default chart for Indonesian SMEs                                                                         |
+| `ledger`       | `/api/ledger`       | journals (draft, posted, reversal), closed periods and the trial balance                                                                |
+| `contacts`     | `/api/contacts`     | customers and vendors: NPWP, payment terms                                                                                              |
+| `products`     | `/api/products`     | goods and services: SKU, prices, VAT rate, default revenue and expense accounts                                                         |
+| `sales`        | `/api/sales`        | invoices: draft, issue (number `INV/<year>/<n>`, journal Dr receivable / Cr revenue and VAT output through the outbox), void (reversal) |
 
 The other services call each other over HTTP with `createClient` from `@deus/http`: the client continues the trace,
 records `http.client.request.duration` and turns failures into 502 or 504.

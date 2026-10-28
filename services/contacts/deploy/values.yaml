@@ -1,0 +1,7 @@
+image:
+  repository: contacts
+route:
+  enabled: true
+  pathPrefix: /api/contacts
+database:
+  enabled: true
