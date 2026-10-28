@@ -149,3 +149,50 @@ export const allocationsClient = (
   reverse: async (request) =>
     client.post(`/internal/${service}/allocations/reverse`, { body: request, token: await serviceToken() }),
 });
+
+export interface ProfileRef {
+  organizationId: string;
+  legalName: string;
+  taxId: string | null;
+  address: string | null;
+  currency: "IDR";
+  fiscalYearStartMonth: number;
+}
+
+export interface BalanceRow {
+  accountId: string;
+  debit: string;
+  credit: string;
+}
+
+export const chartLookup =
+  (client: Client, serviceToken: ServiceToken) =>
+  async (organizationId: string): Promise<AccountRef[]> =>
+    client.get("/internal/accounts/chart", { query: { organizationId }, token: await serviceToken() });
+
+export const profileLookup =
+  (client: Client, serviceToken: ServiceToken) =>
+  async (organizationId: string): Promise<ProfileRef | null> => {
+    try {
+      return await client.get<ProfileRef>("/internal/organization/profile", {
+        query: { organizationId },
+        token: await serviceToken(),
+      });
+    } catch (error) {
+      if ((error as { status?: number }).status === 404) return null;
+      throw error;
+    }
+  };
+
+export type Balances = (
+  organizationId: string,
+  range: { from?: string; to: string; accountId?: string[] },
+) => Promise<BalanceRow[]>;
+
+export const balancesLookup =
+  (client: Client, serviceToken: ServiceToken): Balances =>
+  async (organizationId, range) =>
+    client.get("/internal/ledger/balances", {
+      query: { organizationId, from: range.from, to: range.to, accountId: range.accountId },
+      token: await serviceToken(),
+    });

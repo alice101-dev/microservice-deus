@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import type { Verifier } from "@deus/auth";
+import type { ServiceVerifier, Verifier } from "@deus/auth";
 import { loadConfig } from "@deus/config";
 import { createTestDatabase } from "@deus/db/testing";
 import { createLogger } from "@deus/logger";
@@ -15,6 +15,11 @@ afterAll(() => telemetry.shutdown());
 const ORG_A = "00000000-0000-4000-8000-00000000000a";
 const ORG_B = "00000000-0000-4000-8000-00000000000b";
 const verify: Verifier = async (token) => ({ userId: "u-1", email: "user@example.com", organizationId: token, token });
+
+const verifyService: ServiceVerifier = async (token) => {
+  if (!token.startsWith("svc:")) throw new Error("not a service token");
+  return { service: token.slice(4), namespace: "staging-deus" };
+};
 
 describe.skipIf(!url)("organization against PostgreSQL", () => {
   let database: Awaited<ReturnType<typeof createTestDatabase<typeof schema>>>;
@@ -40,6 +45,7 @@ describe.skipIf(!url)("organization against PostgreSQL", () => {
       logger: createLogger({ name: "organization" }),
       db: database.db,
       verify,
+      verifyService,
     });
   });
   afterAll(() => database.cleanup());
@@ -64,5 +70,17 @@ describe.skipIf(!url)("organization against PostgreSQL", () => {
   test("validates the tax id and fiscal month", async () => {
     expect((await call(ORG_A, { method: "PUT", body: { legalName: "x", taxId: "12-34" } })).status).toBe(400);
     expect((await call(ORG_A, { method: "PUT", body: { legalName: "x", fiscalYearStartMonth: 13 } })).status).toBe(400);
+  });
+
+  test("serves the profile to other services by organization", async () => {
+    const internal = (organizationId: string, token: string) =>
+      app.handle(
+        new Request(`http://localhost/internal/organization/profile?organizationId=${organizationId}`, {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+      );
+    expect(((await (await internal(ORG_A, "svc:reporting")).json()) as { currency: string }).currency).toBe("IDR");
+    expect((await internal("00000000-0000-4000-8000-0000000000ff", "svc:reporting")).status).toBe(404);
+    expect((await internal(ORG_A, "svc:sales")).status).toBe(403);
   });
 });

@@ -324,6 +324,30 @@
         "jose": "6.2.13",
       },
     },
+    "services/reporting": {
+      "name": "@deus/reporting",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deus/auth": "workspace:*",
+        "@deus/clients": "workspace:*",
+        "@deus/db": "workspace:*",
+        "@deus/documents": "workspace:*",
+        "@deus/errors": "workspace:*",
+        "@deus/http": "workspace:*",
+        "@deus/money": "workspace:*",
+        "@deus/runtime": "workspace:*",
+        "@sinclair/typebox": "0.34.52",
+        "drizzle-orm": "0.45.4",
+        "elysia": "1.4.30",
+      },
+      "devDependencies": {
+        "@deus/config": "workspace:*",
+        "@deus/logger": "workspace:*",
+        "@deus/telemetry": "workspace:*",
+        "drizzle-kit": "0.31.11",
+        "jose": "6.2.13",
+      },
+    },
     "services/sales": {
       "name": "@deus/sales",
       "version": "0.0.0",
@@ -428,6 +452,8 @@
     "@deus/products": ["@deus/products@workspace:services/products"],
 
     "@deus/purchases": ["@deus/purchases@workspace:services/purchases"],
+
+    "@deus/reporting": ["@deus/reporting@workspace:services/reporting"],
 
     "@deus/runtime": ["@deus/runtime@workspace:packages/runtime"],
 

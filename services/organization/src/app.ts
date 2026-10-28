@@ -1,4 +1,10 @@
-import { authentication, requireOrganization, type Verifier } from "@deus/auth";
+import {
+  authentication,
+  requireOrganization,
+  type ServiceVerifier,
+  serviceAuthentication,
+  type Verifier,
+} from "@deus/auth";
 import type { BaseConfig } from "@deus/config";
 import { type Database, withTenant } from "@deus/db";
 import { NotFoundError } from "@deus/errors";
@@ -12,6 +18,7 @@ export interface OrganizationContext {
   logger: Logger;
   db: Database<typeof schema>;
   verify: Verifier;
+  verifyService: ServiceVerifier;
   readiness?: Array<() => Promise<void>>;
 }
 
@@ -33,11 +40,12 @@ const view = (profile: Profile) => ({
   fiscalYearStartMonth: profile.fiscalYearStartMonth,
 });
 
+export const PROFILE_CALLERS = ["reporting", "tax", "notification"] as const;
+
 export function createApp(context: OrganizationContext) {
   const { db } = context;
-  return createService({ config: context.config, logger: context.logger, readiness: context.readiness }).group(
-    "/api/organization",
-    (api) =>
+  return createService({ config: context.config, logger: context.logger, readiness: context.readiness })
+    .group("/api/organization", (api) =>
       api
         .use(authentication(context.verify))
         .get(
@@ -79,5 +87,20 @@ export function createApp(context: OrganizationContext) {
             detail: { summary: "Create or update the company profile" },
           },
         ),
-  );
+    )
+    .group("/internal/organization", (internal) =>
+      internal.use(serviceAuthentication(context.verifyService, PROFILE_CALLERS)).get(
+        "/profile",
+        async ({ query }) => {
+          const [profile] = await withTenant(db, query.organizationId, (tx) => tx.select().from(profiles));
+          if (!profile) throw new NotFoundError("The organization has no profile yet");
+          return view(profile);
+        },
+        {
+          query: t.Object({ organizationId: t.String({ format: "uuid" }) }),
+          response: ProfileView,
+          detail: { summary: "Company profile of an organization, for other services" },
+        },
+      ),
+    );
 }

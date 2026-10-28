@@ -238,6 +238,18 @@ export function createApp(context: AccountsContext) {
           },
         )
         .get(
+          "/chart",
+          ({ query }) =>
+            withTenant(db, query.organizationId, async (tx) =>
+              views(tx, await tx.select().from(accounts).orderBy(asc(accounts.code))),
+            ),
+          {
+            query: t.Object({ organizationId: t.String({ format: "uuid" }) }),
+            response: t.Array(AccountView),
+            detail: { summary: "The whole chart of accounts of an organization, for other services" },
+          },
+        )
+        .get(
           "/by-code",
           ({ query }) =>
             withTenant(db, query.organizationId, async (tx) =>

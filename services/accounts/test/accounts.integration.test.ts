@@ -161,5 +161,11 @@ describe.skipIf(!url)("accounts against PostgreSQL", () => {
       "1-1200",
       "2-1100",
     ]);
+    const chart = await app.handle(
+      new Request(`http://localhost/internal/accounts/chart?organizationId=${ORG_A}`, {
+        headers: { authorization: "Bearer svc:reporting" },
+      }),
+    );
+    expect(((await chart.json()) as unknown[]).length).toBeGreaterThan(20);
   });
 });
