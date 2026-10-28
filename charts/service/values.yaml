@@ -4,6 +4,7 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 environment: staging
+name: ""
 partOf: deus
 port: 3000
 logLevel: info

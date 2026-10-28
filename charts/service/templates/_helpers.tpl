@@ -1,5 +1,5 @@
 {{- define "service.name" -}}
-{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- .Values.name | default .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "service.selectorLabels" -}}
