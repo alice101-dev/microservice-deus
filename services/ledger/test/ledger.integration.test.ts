@@ -379,5 +379,28 @@ describe.skipIf(!url)("ledger against PostgreSQL", () => {
     const repeated = await reverse("svc:sales", "inv-1");
     expect(repeated.status).toBe(200);
     expect(((await repeated.json()) as JournalBody).id).toBe(reversal.id);
+
+    const balances = async (query: string, token = "svc:reporting") =>
+      app.handle(
+        new Request(`http://localhost/internal/ledger/balances?organizationId=${ORG_C}${query}`, {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+      );
+    const march = (await (await balances("&from=2026-03-01&to=2026-03-15")).json()) as Array<{
+      accountId: string;
+      debit: string;
+      credit: string;
+    }>;
+    expect(march.sort((a, b) => a.accountId.localeCompare(b.accountId))).toEqual([
+      { accountId: CASH, debit: "110000.00", credit: "0.00" },
+      { accountId: REVENUE, debit: "0.00", credit: "110000.00" },
+    ]);
+    const cash = (await (await balances(`&to=2026-03-31&accountId=${CASH}`)).json()) as Array<{
+      accountId: string;
+      debit: string;
+      credit: string;
+    }>;
+    expect(cash).toEqual([{ accountId: CASH, debit: "110000.00", credit: "110000.00" }]);
+    expect((await balances("&to=2026-03-31", "svc:sales")).status).toBe(403);
   });
 });

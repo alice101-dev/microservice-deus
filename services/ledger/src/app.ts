@@ -21,6 +21,7 @@ import { closedPeriods, type Journal, type JournalLine, journalLines, journals, 
 export type AccountsLookup = Lookup<AccountRef>;
 
 export const JOURNAL_SOURCES = ["sales", "purchases", "payments", "banking", "tax"] as const;
+export const BALANCE_CALLERS = ["reporting", "tax", "banking"] as const;
 
 export interface LedgerContext {
   config: BaseConfig;
@@ -525,6 +526,48 @@ export function createApp(context: LedgerContext) {
             detail: { summary: "Close a period: journals dated in it can no longer be posted" },
           },
         ),
+    )
+    .group("/internal/ledger/balances", (internal) =>
+      internal.use(serviceAuthentication(context.verifyService, BALANCE_CALLERS)).get(
+        "/",
+        ({ query }) =>
+          withTenant(db, query.organizationId, (tx) =>
+            tx
+              .select({
+                accountId: journalLines.accountId,
+                debit: sql<string>`coalesce(sum(${journalLines.debit}), 0)::numeric(20, 2)::text`,
+                credit: sql<string>`coalesce(sum(${journalLines.credit}), 0)::numeric(20, 2)::text`,
+              })
+              .from(journalLines)
+              .innerJoin(journals, eq(journals.id, journalLines.journalId))
+              .where(
+                and(
+                  eq(journals.status, "posted"),
+                  lte(journals.entryDate, query.to),
+                  query.from ? gte(journals.entryDate, query.from) : undefined,
+                  query.accountId ? inArray(journalLines.accountId, [query.accountId].flat()) : undefined,
+                ),
+              )
+              .groupBy(journalLines.accountId),
+          ),
+        {
+          query: t.Object({
+            organizationId: t.String({ format: "uuid" }),
+            from: t.Optional(t.String({ format: "date" })),
+            to: t.String({ format: "date" }),
+            accountId: t.Optional(
+              t.Union([
+                t.String({ format: "uuid" }),
+                t.Array(t.String({ format: "uuid" }), { minItems: 1, maxItems: 200 }),
+              ]),
+            ),
+          }),
+          response: t.Array(t.Object({ accountId: t.String(), debit: t.String(), credit: t.String() })),
+          detail: {
+            summary: "Debit and credit totals per account over posted journals dated from..to, for other services",
+          },
+        },
+      ),
     )
     .group("/internal/ledger", (internal) =>
       internal
