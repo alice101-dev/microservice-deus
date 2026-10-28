@@ -141,4 +141,51 @@ describe("createService", () => {
     );
     expect(names).toContain("process.memory.usage");
   });
+
+  test("records the route and status of every request served over a real listener, once", async () => {
+    const server = createService({ config, logger })
+      .group("/api/served", (api) =>
+        api
+          .resolve(() => ({ user: "u-1" }))
+          .get("/items/:id", ({ params, user }) => ({ id: params.id, user }))
+          .get("/raw", () => new Response("down", { status: 503 }))
+          .get("/conflict", () => {
+            throw new ConflictError("Journal is already posted");
+          }),
+      )
+      .listen(0);
+    try {
+      const base = `http://localhost:${server.server?.port}`;
+      for (const path of ["/api/served/items/9", "/api/served/raw", "/api/served/conflict", "/health/live"]) {
+        await (await fetch(base + path)).text();
+      }
+    } finally {
+      await server.stop();
+    }
+    await telemetry.forceFlush();
+    const points = metrics
+      .getMetrics()
+      .flatMap((resource) => resource.scopeMetrics)
+      .flatMap((scope) => scope.metrics.map((metric) => ({ scope: scope.scope.name, metric })))
+      .filter(({ metric }) => metric.descriptor.name === "http.server.request.duration")
+      .flatMap(({ scope, metric }) => metric.dataPoints.map((point) => ({ scope, attributes: point.attributes })));
+    expect(points.every((point) => point.scope === "@deus/http")).toBe(true);
+    const served = points
+      .map((point) => point.attributes)
+      .filter((attributes) => String(attributes["http.route"]).startsWith("/api/served"));
+    expect(served).toHaveLength(3);
+    expect(served).toContainEqual(
+      expect.objectContaining({ "http.route": "/api/served/items/:id", "http.response.status_code": 200 }),
+    );
+    expect(served).toContainEqual(
+      expect.objectContaining({
+        "http.route": "/api/served/raw",
+        "http.response.status_code": 503,
+        "error.type": "503",
+      }),
+    );
+    expect(served).toContainEqual(
+      expect.objectContaining({ "http.route": "/api/served/conflict", "http.response.status_code": 409 }),
+    );
+  });
 });

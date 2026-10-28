@@ -11,7 +11,12 @@ import {
   type LogRecordExporter,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
-import { MeterProvider, PeriodicExportingMetricReader, type PushMetricExporter } from "@opentelemetry/sdk-metrics";
+import {
+  AggregationType,
+  MeterProvider,
+  PeriodicExportingMetricReader,
+  type PushMetricExporter,
+} from "@opentelemetry/sdk-metrics";
 import { BatchSpanProcessor, SimpleSpanProcessor, type SpanExporter, TracerProvider } from "@opentelemetry/sdk-trace";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 
@@ -64,6 +69,13 @@ export function startTelemetry(options: TelemetryOptions): Telemetry {
   });
   const meterProvider = new MeterProvider({
     resource,
+    views: [
+      {
+        meterName: options.serviceName,
+        instrumentName: "http.server.request.duration",
+        aggregation: { type: AggregationType.DROP },
+      },
+    ],
     readers: [
       new PeriodicExportingMetricReader({
         exporter: metricExporter,

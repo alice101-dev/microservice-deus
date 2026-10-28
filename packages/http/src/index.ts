@@ -4,8 +4,8 @@ import type { Logger } from "@deus/logger";
 import type { Telemetry } from "@deus/telemetry";
 import { openapi } from "@elysia/openapi";
 import { opentelemetry } from "@elysia/opentelemetry";
-import { trace } from "@opentelemetry/api";
-import { Elysia } from "elysia";
+import { metrics, trace } from "@opentelemetry/api";
+import { Elysia, StatusMap } from "elysia";
 
 export type ReadinessCheck = () => Promise<void> | void;
 
@@ -20,6 +20,7 @@ export interface ServiceState {
 }
 
 const HEALTH = "/health/";
+const DURATION_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10];
 
 function traceId(): string | undefined {
   return trace.getActiveSpan()?.spanContext().traceId;
@@ -29,10 +30,35 @@ export function createService(options: ServiceOptions) {
   const { config, logger } = options;
   const state: ServiceState = { draining: false };
   const readiness = options.readiness ?? [];
+  const duration = metrics.getMeter("@deus/http").createHistogram("http.server.request.duration", {
+    unit: "s",
+    description: "Duration of HTTP server requests",
+    advice: { explicitBucketBoundaries: DURATION_BUCKETS },
+  });
+  const started = new WeakMap<Request, number>();
 
   return new Elysia({ name: config.SERVICE_NAME })
     .decorate("logger", logger)
     .state("service", state)
+    .onRequest(({ request }) => {
+      started.set(request, performance.now());
+    })
+    .onAfterResponse({ as: "global" }, ({ request, route, set, responseValue }) => {
+      const start = started.get(request);
+      if (start === undefined || new URL(request.url).pathname.startsWith(HEALTH)) return;
+      const status =
+        responseValue instanceof Response
+          ? responseValue.status
+          : typeof set.status === "number"
+            ? set.status
+            : (StatusMap[set.status as keyof typeof StatusMap] ?? 200);
+      duration.record((performance.now() - start) / 1000, {
+        "http.request.method": request.method,
+        "http.route": route || undefined,
+        "http.response.status_code": status,
+        ...(status >= 500 ? { "error.type": String(status) } : {}),
+      });
+    })
     .use(
       opentelemetry({
         serviceName: config.SERVICE_NAME,
