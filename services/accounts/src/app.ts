@@ -63,7 +63,16 @@ const Ids = t.Union([
   t.String({ format: "uuid" }),
   t.Array(t.String({ format: "uuid" }), { minItems: 1, maxItems: 200 }),
 ]);
-export const LOOKUP_CALLERS = ["ledger", "sales", "purchases", "payments", "banking", "tax", "reporting"] as const;
+export const LOOKUP_CALLERS = [
+  "ledger",
+  "products",
+  "sales",
+  "purchases",
+  "payments",
+  "banking",
+  "tax",
+  "reporting",
+] as const;
 const Code = t.String({ pattern: "^[0-9A-Za-z][0-9A-Za-z.-]{0,19}$" });
 
 export function createApp(context: AccountsContext) {
@@ -208,23 +217,46 @@ export function createApp(context: AccountsContext) {
         ),
     )
     .group("/internal/accounts", (internal) =>
-      internal.use(serviceAuthentication(context.verifyService, LOOKUP_CALLERS)).get(
-        "/lookup",
-        ({ query }) =>
-          withTenant(db, query.organizationId, async (tx) =>
-            views(
-              tx,
-              await tx
-                .select()
-                .from(accounts)
-                .where(inArray(accounts.id, [query.id].flat())),
+      internal
+        .use(serviceAuthentication(context.verifyService, LOOKUP_CALLERS))
+        .get(
+          "/lookup",
+          ({ query }) =>
+            withTenant(db, query.organizationId, async (tx) =>
+              views(
+                tx,
+                await tx
+                  .select()
+                  .from(accounts)
+                  .where(inArray(accounts.id, [query.id].flat())),
+              ),
             ),
-          ),
-        {
-          query: t.Object({ organizationId: t.String({ format: "uuid" }), id: Ids }),
-          response: t.Array(AccountView),
-          detail: { summary: "Accounts of an organization by id, for other services" },
-        },
-      ),
+          {
+            query: t.Object({ organizationId: t.String({ format: "uuid" }), id: Ids }),
+            response: t.Array(AccountView),
+            detail: { summary: "Accounts of an organization by id, for other services" },
+          },
+        )
+        .get(
+          "/by-code",
+          ({ query }) =>
+            withTenant(db, query.organizationId, async (tx) =>
+              views(
+                tx,
+                await tx
+                  .select()
+                  .from(accounts)
+                  .where(inArray(accounts.code, [query.code].flat())),
+              ),
+            ),
+          {
+            query: t.Object({
+              organizationId: t.String({ format: "uuid" }),
+              code: t.Union([Code, t.Array(Code, { minItems: 1, maxItems: 50 })]),
+            }),
+            response: t.Array(AccountView),
+            detail: { summary: "Accounts of an organization by code, for other services" },
+          },
+        ),
     );
 }

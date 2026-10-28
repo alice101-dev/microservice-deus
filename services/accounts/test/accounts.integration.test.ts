@@ -152,5 +152,14 @@ describe.skipIf(!url)("accounts against PostgreSQL", () => {
     expect((await internal(ORG_A, "svc:notification")).status).toBe(403);
     expect((await internal(ORG_A, ORG_A)).status).toBe(401);
     expect((await internal(ORG_A)).status).toBe(401);
+    const byCode = await app.handle(
+      new Request(`http://localhost/internal/accounts/by-code?organizationId=${ORG_A}&code=1-1200&code=2-1100`, {
+        headers: { authorization: "Bearer svc:sales" },
+      }),
+    );
+    expect(((await byCode.json()) as Array<{ code: string }>).map((row) => row.code).sort()).toEqual([
+      "1-1200",
+      "2-1100",
+    ]);
   });
 });

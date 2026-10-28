@@ -6,27 +6,19 @@ import {
   serviceAuthentication,
   type Verifier,
 } from "@deus/auth";
+import type { AccountRef, Lookup } from "@deus/clients";
 import type { BaseConfig } from "@deus/config";
 import { type Database, isUniqueViolation, type Transaction, withTenant } from "@deus/db";
 import { BadRequestError, ConflictError, NotFoundError, UnprocessableError } from "@deus/errors";
 import { createService } from "@deus/http";
 import type { Logger } from "@deus/logger";
 import { AMOUNT_PATTERN, fromCents, toCents } from "@deus/money";
-import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { t } from "elysia";
 import { type LineInput, type NormalizedLine, normalizeLines, periodOf } from "./rules";
 import { closedPeriods, type Journal, type JournalLine, journalLines, journals, type schema } from "./schema";
 
-export interface AccountRef {
-  id: string;
-  code: string;
-  name: string;
-  type: string;
-  active: boolean;
-  postable: boolean;
-}
-
-export type AccountsLookup = (ids: string[], organizationId: string) => Promise<AccountRef[]>;
+export type AccountsLookup = Lookup<AccountRef>;
 
 export const JOURNAL_SOURCES = ["sales", "purchases", "payments", "banking", "tax"] as const;
 
@@ -168,6 +160,35 @@ export function createApp(context: LedgerContext) {
       await tx.update(journals).set({ status: "posted", postedAt: new Date() }).where(eq(journals.id, id));
     }
     return load(tx, id);
+  };
+
+  const reverse = (
+    tx: Tx,
+    organizationId: string,
+    actorId: string,
+    original: Awaited<ReturnType<typeof load>>,
+    input: { date?: string; description?: string },
+  ) => {
+    if (original.journal.status !== "posted") throw new UnprocessableError("Only posted journals can be reversed");
+    if (original.journal.reversalOf) throw new UnprocessableError("A reversal cannot be reversed");
+    const lines = [...original.lines]
+      .sort((a, b) => a.lineNo - b.lineNo)
+      .map((line) => ({
+        lineNo: line.lineNo,
+        accountId: line.accountId,
+        debit: line.credit,
+        credit: line.debit,
+        memo: line.memo,
+      }));
+    return insertJournal(tx, organizationId, actorId, {
+      date: input.date ?? original.journal.entryDate,
+      description: input.description ?? `Reversal of ${original.journal.description}`,
+      lines,
+      post: true,
+      source: "reversal",
+      sourceId: original.journal.id,
+      reversalOf: original.journal.id,
+    });
   };
 
   const record = async (input: {
@@ -363,30 +384,9 @@ export function createApp(context: LedgerContext) {
           async ({ principal, params, body, set }) => {
             const organizationId = requireOrganization(principal);
             try {
-              const reversal = await withTenant(db, organizationId, async (tx) => {
-                const original = await load(tx, params.id);
-                if (original.journal.status !== "posted")
-                  throw new UnprocessableError("Only posted journals can be reversed");
-                if (original.journal.reversalOf) throw new UnprocessableError("A reversal cannot be reversed");
-                const lines = [...original.lines]
-                  .sort((a, b) => a.lineNo - b.lineNo)
-                  .map((line) => ({
-                    lineNo: line.lineNo,
-                    accountId: line.accountId,
-                    debit: line.credit,
-                    credit: line.debit,
-                    memo: line.memo,
-                  }));
-                return insertJournal(tx, organizationId, principal.userId, {
-                  date: body?.date ?? original.journal.entryDate,
-                  description: body?.description ?? `Reversal of ${original.journal.description}`,
-                  lines,
-                  post: true,
-                  source: "reversal",
-                  sourceId: original.journal.id,
-                  reversalOf: original.journal.id,
-                });
-              });
+              const reversal = await withTenant(db, organizationId, async (tx) =>
+                reverse(tx, organizationId, principal.userId, await load(tx, params.id), body ?? {}),
+              );
               set.status = 201;
               return view(reversal.journal, reversal.lines);
             } catch (error) {
@@ -527,38 +527,92 @@ export function createApp(context: LedgerContext) {
         ),
     )
     .group("/internal/ledger", (internal) =>
-      internal.use(serviceAuthentication(context.verifyService, JOURNAL_SOURCES)).post(
-        "/journals",
-        async ({ caller, body, headers, set }) => {
-          const key = headers["idempotency-key"];
-          if (!key) throw new BadRequestError("Idempotency-Key is required");
-          return respond(
-            await record({
-              organizationId: body.organizationId,
-              actorId: body.createdBy,
-              key,
-              source: caller.service,
-              sourceId: body.sourceId,
-              date: body.date,
-              description: body.description,
-              lines: body.lines as LineInput[],
-              post: true,
+      internal
+        .use(serviceAuthentication(context.verifyService, JOURNAL_SOURCES))
+        .post(
+          "/journals",
+          async ({ caller, body, headers, set }) => {
+            const key = headers["idempotency-key"];
+            if (!key) throw new BadRequestError("Idempotency-Key is required");
+            return respond(
+              await record({
+                organizationId: body.organizationId,
+                actorId: body.createdBy,
+                key,
+                source: caller.service,
+                sourceId: body.sourceId,
+                date: body.date,
+                description: body.description,
+                lines: body.lines as LineInput[],
+                post: true,
+              }),
+              set,
+            );
+          },
+          {
+            body: t.Object({
+              organizationId: t.String({ format: "uuid" }),
+              createdBy: t.String({ format: "uuid" }),
+              date: t.String({ format: "date" }),
+              description: t.String({ minLength: 1, maxLength: 500 }),
+              lines: t.Array(LineBody, { minItems: 2, maxItems: 500 }),
+              sourceId: t.String({ minLength: 1, maxLength: 200 }),
             }),
-            set,
-          );
-        },
-        {
-          body: t.Object({
-            organizationId: t.String({ format: "uuid" }),
-            createdBy: t.String({ format: "uuid" }),
-            date: t.String({ format: "date" }),
-            description: t.String({ minLength: 1, maxLength: 500 }),
-            lines: t.Array(LineBody, { minItems: 2, maxItems: 500 }),
-            sourceId: t.String({ minLength: 1, maxLength: 200 }),
-          }),
-          response: { 200: JournalView, 201: JournalView },
-          detail: { summary: "Post a journal on behalf of another service (source = the calling service)" },
-        },
-      ),
+            response: { 200: JournalView, 201: JournalView },
+            detail: { summary: "Post a journal on behalf of another service (source = the calling service)" },
+          },
+        )
+        .post(
+          "/journals/reverse",
+          async ({ caller, body, set }) => {
+            const { organizationId } = body;
+            const findReversal = (tx: Tx, originalId: string) =>
+              tx.select().from(journals).where(eq(journals.reversalOf, originalId));
+            const result = await withTenant(db, organizationId, async (tx) => {
+              const [original] = await tx
+                .select()
+                .from(journals)
+                .where(
+                  and(
+                    eq(journals.source, caller.service),
+                    eq(journals.sourceId, body.sourceId),
+                    isNull(journals.reversalOf),
+                  ),
+                );
+              if (!original) throw new NotFoundError(`No ${caller.service} journal for ${body.sourceId}`);
+              const [existing] = await findReversal(tx, original.id);
+              if (existing) return { ...(await load(tx, existing.id)), created: false };
+              return {
+                ...(await reverse(tx, organizationId, body.createdBy, await load(tx, original.id), body)),
+                created: true,
+              };
+            }).catch(async (error: unknown) => {
+              if (!isUniqueViolation(error)) throw error;
+              return withTenant(db, organizationId, async (tx) => {
+                const [original] = await tx
+                  .select()
+                  .from(journals)
+                  .where(and(eq(journals.source, caller.service), eq(journals.sourceId, body.sourceId)));
+                const [existing] = await findReversal(tx, original?.id ?? "");
+                if (!existing) throw error;
+                return { ...(await load(tx, existing.id)), created: false };
+              });
+            });
+            if (result.created) set.status = 201;
+            else set.headers["idempotent-replayed"] = "true";
+            return view(result.journal, result.lines);
+          },
+          {
+            body: t.Object({
+              organizationId: t.String({ format: "uuid" }),
+              createdBy: t.String({ format: "uuid" }),
+              sourceId: t.String({ minLength: 1, maxLength: 200 }),
+              date: t.Optional(t.String({ format: "date" })),
+              description: t.Optional(t.String({ minLength: 1, maxLength: 500 })),
+            }),
+            response: { 200: JournalView, 201: JournalView },
+            detail: { summary: "Reverse the journal another service posted for a source document, once" },
+          },
+        ),
     );
 }

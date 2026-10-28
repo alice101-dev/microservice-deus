@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@deus/auth": "workspace:*",
+    "@deus/clients": "workspace:*",
     "@deus/db": "workspace:*",
     "@deus/errors": "workspace:*",
     "@deus/http": "workspace:*",

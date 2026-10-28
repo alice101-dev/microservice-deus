@@ -1,12 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { ServiceVerifier, Verifier } from "@deus/auth";
+import type { AccountRef } from "@deus/clients";
 import { loadConfig } from "@deus/config";
 import { createTestDatabase } from "@deus/db/testing";
 import { createLogger } from "@deus/logger";
 import { startTestTelemetry } from "@deus/telemetry/testing";
 import { sql } from "drizzle-orm";
-import { type AccountRef, createApp } from "../src/app";
+import { createApp } from "../src/app";
 import { schema } from "../src/schema";
 
 const url = process.env.DATABASE_TEST_URL;
@@ -24,11 +25,19 @@ const RETIRED = "00000000-0000-4000-8000-000000000599";
 const ASSETS = "00000000-0000-4000-8000-000000000100";
 const UNKNOWN = "00000000-0000-4000-8000-000000000999";
 const ACCOUNTS: AccountRef[] = [
-  { id: ASSETS, code: "1-0000", name: "Aset", type: "asset", active: true, postable: false },
-  { id: CASH, code: "1-1100", name: "Kas", type: "asset", active: true, postable: true },
-  { id: REVENUE, code: "4-1000", name: "Pendapatan Jasa", type: "revenue", active: true, postable: true },
-  { id: EXPENSE, code: "6-1000", name: "Beban Gaji", type: "expense", active: true, postable: true },
-  { id: RETIRED, code: "6-9000", name: "Beban Lama", type: "expense", active: false, postable: true },
+  { id: ASSETS, code: "1-0000", name: "Aset", type: "asset", active: true, parentId: null, postable: false },
+  { id: CASH, code: "1-1100", name: "Kas", type: "asset", active: true, parentId: ASSETS, postable: true },
+  {
+    id: REVENUE,
+    code: "4-1000",
+    name: "Pendapatan Jasa",
+    type: "revenue",
+    active: true,
+    parentId: ASSETS,
+    postable: true,
+  },
+  { id: EXPENSE, code: "6-1000", name: "Beban Gaji", type: "expense", active: true, parentId: ASSETS, postable: true },
+  { id: RETIRED, code: "6-9000", name: "Beban Lama", type: "expense", active: false, parentId: ASSETS, postable: true },
 ];
 
 const verify: Verifier = async (token) => ({
@@ -352,5 +361,23 @@ describe.skipIf(!url)("ledger against PostgreSQL", () => {
     expect((await internal(ORG_C, invoice, "k-3")).status).toBe(401);
     const ofC = (await (await call("/journals", ORG_C)).json()) as JournalBody[];
     expect(ofC.map((row) => row.id)).toEqual([journal.id]);
+
+    const reverse = (token: string, sourceId: string) =>
+      app.handle(
+        new Request("http://localhost/internal/ledger/journals/reverse", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({ organizationId: ORG_C, createdBy: ACTOR, sourceId, date: "2026-03-20" }),
+        }),
+      );
+    expect((await reverse("svc:purchases", "inv-1")).status).toBe(404);
+    expect((await reverse("svc:sales", "inv-unknown")).status).toBe(404);
+    const reversed = await reverse("svc:sales", "inv-1");
+    expect(reversed.status).toBe(201);
+    const reversal = (await reversed.json()) as JournalBody;
+    expect(reversal).toMatchObject({ reversalOf: journal.id, status: "posted" });
+    const repeated = await reverse("svc:sales", "inv-1");
+    expect(repeated.status).toBe(200);
+    expect(((await repeated.json()) as JournalBody).id).toBe(reversal.id);
   });
 });

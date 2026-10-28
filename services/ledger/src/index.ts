@@ -1,7 +1,7 @@
+import { accountsLookup } from "@deus/clients";
 import { createClient } from "@deus/http";
 import { startService } from "@deus/runtime";
 import { Type } from "@sinclair/typebox";
-import { accountsLookup } from "./accounts";
 import { createApp } from "./app";
 import { schema } from "./schema";
 
