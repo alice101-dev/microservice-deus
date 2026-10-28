@@ -1,0 +1,22 @@
+{
+  "name": "@deus/organization",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@deus/auth": "workspace:*",
+    "@deus/db": "workspace:*",
+    "@deus/errors": "workspace:*",
+    "@deus/http": "workspace:*",
+    "@deus/runtime": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "elysia": "1.4.30"
+  },
+  "devDependencies": {
+    "@deus/config": "workspace:*",
+    "@deus/logger": "workspace:*",
+    "@deus/telemetry": "workspace:*",
+    "drizzle-kit": "0.31.11",
+    "jose": "6.2.13"
+  }
+}

@@ -1,0 +1,7 @@
+image:
+  repository: accounts
+route:
+  enabled: true
+  pathPrefix: /api/accounts
+database:
+  enabled: true

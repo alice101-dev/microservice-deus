@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793145787004,
+      "tag": "0000_ledger",
+      "breakpoints": false
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793145787429,
+      "tag": "0001_app_role_grants",
+      "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793145787853,
+      "tag": "0002_posted_journal_guard",
+      "breakpoints": false
+    }
+  ]
+}

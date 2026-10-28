@@ -12,8 +12,11 @@ microservice-deus/
 │   ├── telemetry/      # OpenTelemetry SDK: traces, metrics and logs over OTLP
 │   ├── logger/         # structured logs as OpenTelemetry log records
 │   ├── errors/         # application errors and RFC 9457 problem documents
-│   ├── http/           # Elysia service factory: OpenAPI, tracing, errors, health, graceful shutdown
-│   └── db/             # PostgreSQL pool with spans and metrics, Drizzle, tenant transactions, migration runner
+│   ├── http/           # Elysia service factory (OpenAPI, tracing, errors, health, shutdown) and the HTTP client
+│   ├── db/             # PostgreSQL pool with spans and metrics, Drizzle, tenant transactions, migration runner
+│   ├── auth/           # JWT verification against the identity JWKS and the authenticated principal
+│   ├── money/          # IDR amounts as decimal strings and integer cents
+│   └── runtime/        # startService and runMigrations: config, telemetry, logger, database and verifier wiring
 ├── services/<name>/
 │   ├── src/            # index.ts starts the service, app.ts builds it
 │   ├── test/
@@ -60,6 +63,35 @@ schema violations, `errors` with one entry per invalid field. Every failure is l
 with the stack trace. Unexpected errors never expose their message to the client. Uncaught exceptions are logged
 before the process exits; unhandled rejections are logged.
 
+## Services
+
+| Service        | Routes              | Owns                                                                                     |
+| -------------- | ------------------- | ---------------------------------------------------------------------------------------- |
+| `identity`     | `/api/identity`     | users, sessions and organizations (Better Auth); issues the JWT and serves its JWKS      |
+| `organization` | `/api/organization` | the company profile of an organization: legal name, NPWP, address, currency, fiscal year |
+| `accounts`     | `/api/accounts`     | the chart of accounts, with a default chart for Indonesian SMEs                          |
+| `ledger`       | `/api/ledger`       | journals (draft, posted, reversal), closed periods and the trial balance                 |
+
+The other services call each other over HTTP with `createClient` from `@deus/http`, forwarding the caller's token:
+the client continues the trace, records `http.client.request.duration` and turns failures into 502 or 504.
+
+## Authentication
+
+`identity` signs a short-lived JWT (EdDSA, issuer `deus-identity`, audience `deus`, claims `sub`, `email` and `org`,
+the active organization) at `/api/identity/auth/token`. Every other service verifies it against the JWKS at
+`/api/identity/auth/jwks` (`authentication` from `@deus/auth`) and uses `org` as the tenant of every query.
+
+## Ledger rules
+
+- Every journal has at least two lines, each with either a debit or a credit, and balances to the cent; amounts are
+  decimal strings with at most two fraction digits, computed as integer cents.
+- A posted journal and its lines cannot change: triggers reject the update or delete in the database. A mistake is
+  corrected with a reversal (`POST /journals/:id/reverse`), once per journal.
+- `POST /journals` with an `Idempotency-Key` header returns the first journal for the same key and body, and 422 for
+  the same key with another body.
+- Closing a period (`POST /periods/YYYY-MM/close`) stops posting into it; the close and the posts of a period take the
+  same advisory lock.
+
 ## Database
 
 Each service owns one database in the CloudNativePG cluster `deus-db` (provisioned by the platform repository) with
@@ -82,7 +114,9 @@ so row level security applies to it. Set `database.enabled: true` in the service
   file cannot change. A file with `CREATE INDEX CONCURRENTLY` must hold only that statement and runs outside a
   transaction.
 - **Linting**: Squawk checks every migration before a commit (`.squawk.toml`: PostgreSQL 18, files run in a
-  transaction; `require-lock-timeout` and `require-statement-timeout` are off because the runner sets both).
+  transaction; `require-lock-timeout` and `require-statement-timeout` are off because the runner sets both;
+  `prefer-bigint-over-int` and `prefer-bigint-over-smallint` are off because identifiers are UUIDs and integer
+  columns only hold small bounded values with a CHECK constraint, such as a month).
 - `make test-integration` runs the tests against a PostgreSQL 18 container.
 
 ## Health and shutdown
