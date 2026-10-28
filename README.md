@@ -23,6 +23,7 @@ microservice-deus/
 │   ├── src/            # index.ts starts the service, app.ts builds it
 │   ├── test/
 │   └── deploy/         # values.yaml and values-<env>.yaml for charts/service
+├── web/                # SvelteKit SPA (src/), Bun static server (server/), browser journey (e2e/)
 ├── charts/service/     # one Helm chart for every service
 ├── Dockerfile          # bundles one service (SERVICE build argument) into a distroless Bun image
 └── Makefile
@@ -134,6 +135,26 @@ the active organization) at `/api/identity/auth/token`. Every other service veri
   until they were applied.
 - Closing a period (`POST /periods/YYYY-MM/close`) stops posting into it; the close and the posts of a period take the
   same advisory lock.
+
+## Web
+
+`web/` is a SvelteKit 3 single-page app (adapter-static, no server-side rendering or server routes) served at `/`
+through the same gateway as the API, so the browser talks to one origin.
+
+- **API clients**: Eden Treaty clients typed from each service's `createApp` (`@deus/<service>/app`, type-only
+  imports), so a backend change that breaks the UI fails `svelte-check`. Requests carry the Better Auth JWT, which is
+  refreshed a minute before it expires and once after a 401. Response dates stay strings (`parseDate: false`).
+- **Money**: amounts are computed with `@deus/money`, so invoice previews match the backend to the cent.
+- **Errors and telemetry**: unhandled errors, rejected promises, SvelteKit load errors and failed requests are
+  logged as OpenTelemetry log records (`service.name=web`); fetch spans continue into the services, so one trace
+  runs from the click to the database. The browser sends OTLP to `/otlp/v1/{traces,logs}` on the gateway; the
+  platform collector stamps `service.name=web` on everything that arrives there.
+- **Serving**: `web/server` (Bun, `createService`) serves hashed assets as immutable, everything else `no-cache`,
+  falls back to `index.html` for routes, and sets security headers; the page carries a hash-based CSP.
+- **Checks**: `make web` runs `svelte-check`, Vitest (jsdom, Testing Library) and the build. `make e2e` walks a
+  browser through registration, onboarding, a customer, a product, an invoice, its payment and the reports against
+  `BASE_URL` (default `http://localhost:8080`); `HEADED=1` shows the browser. SvelteKit and `svelte-check` need the
+  TypeScript 6 API (`typescript`); the workspace typecheck uses TypeScript 7 (`typescript-native`).
 
 ## Database
 
