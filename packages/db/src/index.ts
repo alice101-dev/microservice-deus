@@ -35,12 +35,14 @@ interface Instruments {
   duration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"]>;
 }
 
-function instrumentClient(client: pg.PoolClient, base: Attributes, { tracer, duration }: Instruments) {
-  const tagged = client as pg.PoolClient & { [INSTRUMENTED]?: boolean };
+type Queryable = { query: (...args: unknown[]) => unknown; [INSTRUMENTED]?: boolean };
+
+function instrumentQueries(target: pg.Pool | pg.PoolClient, base: Attributes, { tracer, duration }: Instruments) {
+  const tagged = target as unknown as Queryable;
   if (tagged[INSTRUMENTED]) return;
   tagged[INSTRUMENTED] = true;
-  const original = client.query.bind(client) as (...args: unknown[]) => unknown;
-  (client as unknown as { query: (...args: unknown[]) => unknown }).query = (...args: unknown[]) => {
+  const original = tagged.query.bind(target);
+  tagged.query = (...args: unknown[]) => {
     if (typeof args[args.length - 1] === "function") return original(...args);
     const text = queryText(args);
     const operation = operationName(text);
@@ -103,7 +105,8 @@ export function createPool(options: DatabaseOptions): pg.Pool {
       advice: { explicitBucketBoundaries: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10] },
     }),
   };
-  pool.on("connect", (client) => instrumentClient(client, base, instruments));
+  instrumentQueries(pool, base, instruments);
+  pool.on("connect", (client) => instrumentQueries(client, base, instruments));
   const poolName = `${options.host}/${options.database}`;
   meter
     .createObservableUpDownCounter("db.client.connection.count", {

@@ -131,5 +131,14 @@ describe.skipIf(!url)("against PostgreSQL", () => {
     expect(query?.attributes["db.namespace"]).toBe(database);
     expect(query?.attributes["db.system.name"]).toBe("postgresql");
     expect(query?.attributes["db.operation.name"]).toBe("SELECT");
+
+    await db.execute(sql`select count(*) from entries`);
+    const outsideTransaction = spans
+      .getFinishedSpans()
+      .filter(
+        (span) => span.kind === SpanKind.CLIENT && span.attributes["db.query.text"] === "select count(*) from entries",
+      );
+    expect(outsideTransaction).toHaveLength(1);
+    expect(outsideTransaction[0]?.attributes["db.operation.name"]).toBe("SELECT");
   }
 });
