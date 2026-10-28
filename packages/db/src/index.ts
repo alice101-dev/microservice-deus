@@ -170,6 +170,31 @@ function pgCode(error: unknown): string | undefined {
   return undefined;
 }
 
+const UNAVAILABLE = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ETIMEDOUT",
+  "ECONNRESET",
+  "EPIPE",
+  "57P01",
+  "57P03",
+  "3D000",
+  "28P01",
+]);
+const UNAVAILABLE_MESSAGE = /connection terminated|timeout exceeded when trying to connect/i;
+
+export function databaseUnavailable(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; current && depth < 5; depth++) {
+    const { code, message } = current as { code?: unknown; message?: unknown };
+    if (typeof code === "string" && UNAVAILABLE.has(code)) return true;
+    if (typeof message === "string" && UNAVAILABLE_MESSAGE.test(message)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export const isUniqueViolation = (error: unknown) => pgCode(error) === "23505";
 export const isForeignKeyViolation = (error: unknown) => pgCode(error) === "23503";
 export const isCheckViolation = (error: unknown) => pgCode(error) === "23514";

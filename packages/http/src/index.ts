@@ -20,6 +20,7 @@ export interface ServiceState {
 }
 
 const HEALTH = "/health/";
+const STARTUP_GRACE_MS = 60_000;
 const DURATION_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10];
 
 function traceId(): string | undefined {
@@ -29,6 +30,8 @@ function traceId(): string | undefined {
 export function createService(options: ServiceOptions) {
   const { config, logger } = options;
   const state: ServiceState = { draining: false };
+  const startedAt = Date.now();
+  let ready: boolean | undefined;
   const readiness = options.readiness ?? [];
   const duration = metrics.getMeter("@deus/http").createHistogram("http.server.request.duration", {
     unit: "s",
@@ -114,9 +117,13 @@ export function createService(options: ServiceOptions) {
       }
       try {
         await Promise.all(readiness.map((check) => check()));
+        if (ready === false) logger.info("readiness restored");
+        ready = true;
         return { status: "ready" };
       } catch (error) {
-        logger.warn("readiness check failed", {}, error);
+        const starting = ready === undefined && Date.now() - startedAt < STARTUP_GRACE_MS;
+        if (!starting && ready !== false) logger.warn("readiness check failed", {}, error);
+        if (!starting) ready = false;
         set.status = 503;
         return { status: "unavailable" };
       }

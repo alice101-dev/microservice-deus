@@ -1,4 +1,4 @@
-import { check, fail } from "k6";
+import { check, fail, sleep } from "k6";
 import encoding from "k6/encoding";
 import http from "k6/http";
 
@@ -6,6 +6,7 @@ const BASE = __ENV.BASE_URL || "http://localhost:8080";
 const ORIGIN = __ENV.AUTH_ORIGIN || BASE;
 const AUTH = `${BASE}/api/identity/auth`;
 const ok = http.expectedStatuses({ min: 200, max: 299 });
+const SETUP_PATIENCE_MS = 8 * 60_000;
 
 const scenario = (exec, rate, timeUnit) => ({
   executor: "constant-arrival-rate",
@@ -25,7 +26,7 @@ export const options = {
     buy: scenario("buy", Number(__ENV.BUY_PER_MINUTE || 1), "1m"),
     mistakes: scenario("mistakes", Number(__ENV.MISTAKES_PER_MINUTE || 3), "1m"),
   },
-  setupTimeout: "3m",
+  setupTimeout: "10m",
   systemTags: ["scenario", "name", "method", "status", "expected_response", "error_code", "check"],
 };
 
@@ -34,12 +35,24 @@ const between = (min, max) => min + Math.floor(Math.random() * (max - min + 1));
 const jakarta = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
 const monthStart = () => `${jakarta().slice(0, 8)}01`;
 
-function authPost(path, body) {
-  const response = http.post(`${AUTH}${path}`, JSON.stringify(body), {
-    headers: { "content-type": "application/json", origin: ORIGIN },
-    tags: { name: `POST /api/identity/auth${path}` },
-    responseCallback: ok,
-  });
+function patiently(request) {
+  const deadline = Date.now() + SETUP_PATIENCE_MS;
+  let response = request();
+  while (response.status >= 300 && Date.now() < deadline) {
+    sleep(5);
+    response = request();
+  }
+  return response;
+}
+
+function authPost(path, body, retry = false) {
+  const send = () =>
+    http.post(`${AUTH}${path}`, JSON.stringify(body), {
+      headers: { "content-type": "application/json", origin: ORIGIN },
+      tags: { name: `POST /api/identity/auth${path}` },
+      responseCallback: ok,
+    });
+  const response = retry ? patiently(send) : send();
   if (response.status >= 300) fail(`${path} returned ${response.status}: ${response.body}`);
   return response.json();
 }
@@ -52,9 +65,9 @@ function issueToken() {
   return { token, expiresAt: claims.exp * 1000 };
 }
 
-function signIn(credentials) {
-  authPost("/sign-in/email", { email: credentials.email, password: credentials.password });
-  authPost("/organization/set-active", { organizationId: credentials.organizationId });
+function signIn(credentials, retry = false) {
+  authPost("/sign-in/email", { email: credentials.email, password: credentials.password }, retry);
+  authPost("/organization/set-active", { organizationId: credentials.organizationId }, retry);
   return issueToken() ?? fail("no token after sign-in");
 }
 
@@ -80,7 +93,7 @@ function api(credentials, method, path, name, body, expected = ok) {
 
 function seed(credentials) {
   const call = (method, path, body) => {
-    const response = api(credentials, method, path, path, body);
+    const response = patiently(() => api(credentials, method, path, path, body));
     if (response.status >= 300) fail(`${method} ${path} returned ${response.status}: ${response.body}`);
     return response.json();
   };
@@ -143,13 +156,14 @@ function seed(credentials) {
 
 export function setup() {
   const credentials = { email: `traffic+${Date.now()}@deus.example`, password: `${crypto.randomUUID()}-Aa1` };
-  authPost("/sign-up/email", { name: "Lalu Lintas", ...credentials });
-  const organization = authPost("/organization/create", {
-    name: "PT Lalu Lintas Uji",
-    slug: `lalu-lintas-${crypto.randomUUID().slice(0, 8)}`,
-  });
+  authPost("/sign-up/email", { name: "Lalu Lintas", ...credentials }, true);
+  const organization = authPost(
+    "/organization/create",
+    { name: "PT Lalu Lintas Uji", slug: `lalu-lintas-${crypto.randomUUID().slice(0, 8)}` },
+    true,
+  );
   credentials.organizationId = organization.id;
-  session = signIn(credentials);
+  session = signIn(credentials, true);
   return { credentials, ...seed(credentials) };
 }
 

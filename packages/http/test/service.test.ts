@@ -59,12 +59,31 @@ describe("createService", () => {
     expect((await call("/health/ready")).status).toBe(200);
     ready = false;
     const notReady = await call("/health/ready");
+    await call("/health/ready");
     ready = true;
     expect(notReady.status).toBe(503);
-    expect(logs.getFinishedLogRecords().some((record) => record.body === "readiness check failed")).toBe(true);
+    expect((await call("/health/ready")).status).toBe(200);
+    const bodies = logs.getFinishedLogRecords().map((record) => record.body);
+    expect(bodies.filter((body) => body === "readiness check failed")).toHaveLength(1);
+    expect(bodies).toContain("readiness restored");
     app.store.service.draining = true;
     expect((await call("/health/ready")).status).toBe(503);
     app.store.service.draining = false;
+  });
+
+  test("stays quiet while a starting service waits for its dependencies", async () => {
+    const starting = createService({
+      config,
+      logger,
+      readiness: [
+        () => {
+          throw new Error("database unreachable");
+        },
+      ],
+    });
+    const response = await starting.handle(new Request("http://localhost/health/ready"));
+    expect(response.status).toBe(503);
+    expect(logs.getFinishedLogRecords().some((record) => record.body === "readiness check failed")).toBe(false);
   });
 
   test("answers unknown routes with a problem document", async () => {

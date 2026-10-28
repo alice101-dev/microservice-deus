@@ -1,4 +1,4 @@
-import type { Database, Transaction } from "@deus/db";
+import { type Database, databaseUnavailable, type Transaction } from "@deus/db";
 import { AppError } from "@deus/errors";
 import type { Logger } from "@deus/logger";
 import { context, metrics, propagation, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -226,6 +226,8 @@ export function createRelay(options: RelayOptions) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let running: Promise<void> | undefined;
   let lastMaintenance = 0;
+  let unavailableSince: number | undefined;
+  let escalated = false;
 
   const tick = async () => {
     try {
@@ -236,9 +238,22 @@ export function createRelay(options: RelayOptions) {
         const purged = await purge();
         if (purged > 0) options.logger.info("outbox purged", { "outbox.purged": purged });
       }
+      if (unavailableSince !== undefined) {
+        options.logger.info("outbox relay reconnected", { "outbox.outage_ms": Date.now() - unavailableSince });
+        unavailableSince = undefined;
+        escalated = false;
+      }
       if (!stopped) timer = setTimeout(loop, claimed === batchSize ? 0 : intervalMs);
     } catch (error) {
-      options.logger.error("outbox relay failed", {}, error);
+      if (!databaseUnavailable(error)) {
+        options.logger.error("outbox relay failed", {}, error);
+      } else if (unavailableSince === undefined) {
+        unavailableSince = Date.now();
+        options.logger.warn("outbox relay cannot reach the database, retrying", {}, error);
+      } else if (!escalated && Date.now() - unavailableSince > 60_000) {
+        escalated = true;
+        options.logger.error("outbox relay failed", { "outbox.outage_ms": Date.now() - unavailableSince }, error);
+      }
       if (!stopped) timer = setTimeout(loop, intervalMs * 5);
     }
   };

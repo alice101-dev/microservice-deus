@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type pg from "pg";
+import { databaseUnavailable } from "./index";
 
 export interface Migration {
   id: string;
@@ -22,6 +23,27 @@ export class MigrationError extends Error {
 }
 
 const LOCK_KEY = 7_401_531_118;
+export async function connectWhenReady<T>(
+  connect: () => Promise<T>,
+  logger: MigrateLogger,
+  { timeoutMs = 480_000, maxDelayMs = 15_000, sleep = (ms: number) => Bun.sleep(ms) } = {},
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await connect();
+    } catch (error) {
+      if (!databaseUnavailable(error) || Date.now() >= deadline) throw error;
+      const delay = Math.min(1000 * 2 ** (attempt - 1), maxDelayMs);
+      logger.info("waiting for the database", {
+        attempt,
+        reason: String((error as { code?: unknown }).code ?? (error as Error).message),
+        "retry.delay_ms": delay,
+      });
+      await sleep(delay);
+    }
+  }
+}
 
 export async function loadMigrations(directory: string): Promise<Migration[]> {
   const files = (await readdir(directory)).filter((file) => file.endsWith(".sql")).sort();
@@ -115,10 +137,19 @@ export interface MigrationJobOptions {
 
 export async function runMigrationJob(options: MigrationJobOptions): Promise<never> {
   const { default: pg } = await import("pg");
-  const client = new pg.Client({ ...options.connection, application_name: "migrations" });
+  let client: pg.Client | undefined;
   let code = 0;
   try {
-    await client.connect();
+    client = await connectWhenReady(async () => {
+      const candidate = new pg.Client({ ...options.connection, application_name: "migrations" });
+      try {
+        await candidate.connect();
+        return candidate;
+      } catch (error) {
+        await candidate.end().catch(() => {});
+        throw error;
+      }
+    }, options.logger);
     const applied = await migrate(client, await loadMigrations(options.directory), options.logger);
     options.logger.info("migrations complete", {
       "migration.applied": applied.length,
@@ -128,7 +159,7 @@ export async function runMigrationJob(options: MigrationJobOptions): Promise<nev
     code = 1;
     options.logger.error("migrations failed", { database: options.connection.database }, error);
   } finally {
-    await client.end().catch(() => {});
+    await client?.end().catch(() => {});
     await options.flush();
   }
   process.exit(code);
