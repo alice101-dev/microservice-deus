@@ -32,8 +32,12 @@ const api = Bun.serve({
     const { pathname } = new URL(request.url);
     if (pathname === "/.well-known/openid-configuration") return Response.json({ issuer: ISSUER });
     if (pathname === "/openid/v1/jwks") {
+      if (!request.headers.get("accept")?.includes("application/jwk-set+json"))
+        return new Response("", { status: 406 });
       jwksRequests++;
-      return Response.json({ keys: served });
+      return new Response(JSON.stringify({ keys: served }), {
+        headers: { "content-type": "application/jwk-set+json" },
+      });
     }
     return new Response("", { status: 404 });
   },

@@ -52,7 +52,7 @@ export function kubernetesKeys(options: KubernetesOptions) {
     const token = (await Bun.file(options.tokenFile).text()).trim();
     const ca = options.caFile ? await Bun.file(options.caFile).text() : undefined;
     const response = await fetch(new URL(path, options.apiUrl), {
-      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+      headers: { authorization: `Bearer ${token}`, accept: "application/jwk-set+json, application/json" },
       signal: AbortSignal.timeout(5000),
       ...(ca ? { tls: { ca } } : {}),
     });
