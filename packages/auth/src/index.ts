@@ -56,3 +56,5 @@ export function requireOrganization(principal: Principal): string {
   if (!principal.organizationId) throw new ForbiddenError("Select an organization first");
   return principal.organizationId;
 }
+
+export * from "./service";

@@ -44,6 +44,12 @@ spec:
               containerPort: {{ .Values.port }}
           env:
             {{- include "service.commonEnv" . | nindent 12 }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SERVICE_IDENTITY_DIR
+              value: /var/run/secrets/deus
             - name: PORT
               value: {{ .Values.port | quote }}
             - name: SHUTDOWN_DRAIN_MS
@@ -92,3 +98,23 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             {{- include "service.securityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: service-identity
+              mountPath: /var/run/secrets/deus
+              readOnly: true
+      volumes:
+        - name: service-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.serviceIdentity.audience }}
+                  expirationSeconds: {{ .Values.serviceIdentity.expirationSeconds }}
+                  path: service/token
+              - serviceAccountToken:
+                  expirationSeconds: {{ .Values.serviceIdentity.expirationSeconds }}
+                  path: kube/token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: kube/ca.crt

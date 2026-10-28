@@ -50,6 +50,9 @@ route:
     name: edge
     namespace: kgateway-system
     sectionName: http
+serviceIdentity:
+  audience: deus-services
+  expirationSeconds: 3600
 networkPolicy:
   enabled: true
   gatewayNamespace: kgateway-system
