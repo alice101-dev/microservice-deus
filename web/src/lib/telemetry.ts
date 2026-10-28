@@ -24,7 +24,7 @@ export function startTelemetry(options: { version: string; environment: string; 
   started = true;
   const endpoint = options.endpoint ?? "/otlp/v1";
   const resource = resourceFromAttributes({
-    "service.name": "deus-dashboard",
+    "service.name": "dashboard",
     "service.version": options.version,
     "service.namespace": "deus",
     "deployment.environment.name": options.environment,

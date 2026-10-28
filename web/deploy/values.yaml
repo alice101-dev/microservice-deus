@@ -1,4 +1,4 @@
-name: deus-dashboard
+name: dashboard
 image:
   repository: web
 route:
