@@ -1,4 +1,5 @@
 import { authClient, forgetToken } from "./auth";
+import { setUser } from "./interactions";
 
 export interface SessionUser {
   id: string;
@@ -25,6 +26,7 @@ class Session {
   async load() {
     const { data } = await authClient.getSession();
     this.user = data?.user ? { id: data.user.id, name: data.user.name, email: data.user.email } : null;
+    setUser(this.user?.id ?? null);
     this.activeOrganizationId =
       (data?.session as { activeOrganizationId?: string | null } | undefined)?.activeOrganizationId ?? null;
     if (this.user) {
@@ -54,6 +56,7 @@ class Session {
   async signOut() {
     await authClient.signOut();
     forgetToken();
+    setUser(null);
     this.user = null;
     this.organizations = [];
     this.activeOrganizationId = null;

@@ -3,10 +3,13 @@ import { CompositePropagator, W3CTraceContextPropagator } from "@opentelemetry/c
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
+import { DocumentLoadInstrumentation } from "@opentelemetry/instrumentation-document-load";
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs";
 import { BatchSpanProcessor, StackContextManager, TracerProvider } from "@opentelemetry/sdk-trace";
+import { type Metric, onCLS, onFCP, onINP, onLCP, onTTFB } from "web-vitals";
+import { currentRoute, instrumentInteractions } from "./interactions";
 
 export type LogLevel = "info" | "warn" | "error";
 
@@ -16,8 +19,36 @@ const SEVERITY: Record<LogLevel, SeverityNumber> = {
   error: SeverityNumber.ERROR,
 };
 
+const OTLP = /\/otlp\//;
+const SESSION_KEY = "deus.session_id";
+
 let started = false;
 let providers: Array<{ forceFlush(): Promise<void> }> = [];
+
+function randomId() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function sessionId() {
+  try {
+    const existing = sessionStorage.getItem(SESSION_KEY);
+    if (existing) return existing;
+    const created = randomId();
+    sessionStorage.setItem(SESSION_KEY, created);
+    return created;
+  } catch {
+    return randomId();
+  }
+}
+
+function reportVital(metric: Metric) {
+  log("info", "web vital", {
+    "web_vital.name": metric.name,
+    "web_vital.value": metric.value,
+    "web_vital.rating": metric.rating,
+    "navigation.type": metric.navigationType,
+  });
+}
 
 export function startTelemetry(options: { version: string; environment: string; endpoint?: string }) {
   if (started) return;
@@ -28,6 +59,7 @@ export function startTelemetry(options: { version: string; environment: string; 
     "service.version": options.version,
     "service.namespace": "deus",
     "deployment.environment.name": options.environment,
+    "session.id": sessionId(),
   });
   const tracerProvider = new TracerProvider({
     resource,
@@ -42,8 +74,13 @@ export function startTelemetry(options: { version: string; environment: string; 
   trace.setGlobalTracerProvider(tracerProvider);
   logs.setGlobalLoggerProvider(loggerProvider);
   registerInstrumentations({
-    instrumentations: [new FetchInstrumentation({ ignoreUrls: [/\/otlp\//], clearTimingResources: true })],
+    instrumentations: [
+      new FetchInstrumentation({ ignoreUrls: [OTLP], clearTimingResources: true }),
+      new DocumentLoadInstrumentation(),
+    ],
   });
+  instrumentInteractions(OTLP);
+  for (const subscribe of [onLCP, onINP, onCLS, onFCP, onTTFB]) subscribe(reportVital);
   providers = [tracerProvider, loggerProvider];
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") void flush();
@@ -71,6 +108,7 @@ export function log(level: LogLevel, message: string, attributes: Attributes = {
     body: message,
     attributes: {
       "url.path": typeof location === "undefined" ? undefined : location.pathname,
+      "app.route": currentRoute() ?? undefined,
       ...attributes,
       ...errorAttributes(error),
     },

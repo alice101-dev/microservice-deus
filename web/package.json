@@ -11,7 +11,8 @@
     "build": "vite build",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
     "test": "vitest run",
-    "e2e": "bun e2e/journey.ts"
+    "e2e": "bun e2e/journey.ts",
+    "e2e:telemetry": "bun e2e/telemetry.ts"
   },
   "dependencies": {
     "@deus/config": "workspace:*",
@@ -25,12 +26,14 @@
     "@opentelemetry/exporter-logs-otlp-http": "0.300.0",
     "@opentelemetry/exporter-trace-otlp-http": "0.300.0",
     "@opentelemetry/instrumentation": "0.300.0",
+    "@opentelemetry/instrumentation-document-load": "0.69.0",
     "@opentelemetry/instrumentation-fetch": "0.300.0",
     "@opentelemetry/resources": "3.0.0",
     "@opentelemetry/sdk-logs": "3.0.0",
     "@opentelemetry/sdk-trace": "3.0.0",
     "@sinclair/typebox": "0.34.52",
-    "better-auth": "1.7.14"
+    "better-auth": "1.7.14",
+    "web-vitals": "6.2.3"
   },
   "devDependencies": {
     "@deus/accounts": "workspace:*",
