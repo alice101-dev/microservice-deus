@@ -49,14 +49,6 @@ spec:
               value: {{ required "ratePerMinute.buy is required" $rate.buy | quote }}
             - name: MISTAKES_PER_MINUTE
               value: {{ required "ratePerMinute.mistakes is required" $rate.mistakes | quote }}
-            - name: UI_PER_MINUTE
-              value: {{ required "ratePerMinute.ui is required" $rate.ui | quote }}
-            - name: HOME
-              value: /tmp
-            - name: UI_URL
-              value: {{ trimSuffix "." .Values.baseUrl | quote }}
-            - name: K6_BROWSER_ARGS
-              value: {{ printf "no-sandbox,unsafely-treat-insecure-origin-as-secure=%s" (trimSuffix "." .Values.baseUrl) | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
@@ -70,16 +62,10 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
-            - name: shm
-              mountPath: /dev/shm
       volumes:
         - name: script
           configMap:
             name: {{ include "traffic.name" . }}
         - name: tmp
           emptyDir:
-            sizeLimit: 512Mi
-        - name: shm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 256Mi
+            sizeLimit: 64Mi

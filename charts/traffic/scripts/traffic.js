@@ -1,12 +1,10 @@
 import { check, fail, sleep } from "k6";
-import { browser } from "k6/browser";
 import encoding from "k6/encoding";
 import http from "k6/http";
 
 const BASE = __ENV.BASE_URL || "http://localhost:8080";
 const ORIGIN = __ENV.AUTH_ORIGIN || BASE;
 const AUTH = `${BASE}/api/identity/auth`;
-const UI = __ENV.UI_URL || BASE.replace(/\.$/, "");
 const ok = http.expectedStatuses({ min: 200, max: 299 });
 const SETUP_PATIENCE_MS = 8 * 60_000;
 
@@ -27,13 +25,6 @@ export const options = {
     sell: scenario("sell", Number(__ENV.SELL_PER_MINUTE || 2), "1m"),
     buy: scenario("buy", Number(__ENV.BUY_PER_MINUTE || 1), "1m"),
     mistakes: scenario("mistakes", Number(__ENV.MISTAKES_PER_MINUTE || 3), "1m"),
-    ui: {
-      ...scenario("ui", Number(__ENV.UI_PER_MINUTE || 1), "1m"),
-      preAllocatedVUs: 1,
-      maxVUs: 1,
-      gracefulStop: "60s",
-      options: { browser: { type: "chromium" } },
-    },
   },
   setupTimeout: "10m",
   systemTags: ["scenario", "name", "method", "status", "expected_response", "error_code", "check"],
@@ -364,40 +355,5 @@ export function mistakes(data) {
       responseCallback: client,
     });
     check(response, { "GET /api/ledger/journals without a token is refused": (r) => r.status === 401 });
-  }
-}
-
-const UI_PAGES = [
-  "/",
-  "/sales",
-  "/purchases",
-  "/payments",
-  "/banking",
-  "/contacts",
-  "/products",
-  "/ledger",
-  "/reports",
-  "/tax",
-];
-
-export async function ui(data) {
-  const { credentials } = data;
-  const page = await browser.newPage();
-  try {
-    await page.goto(`${UI}/login`, { waitUntil: "networkidle" });
-    await page.locator('input[type="email"]').fill(credentials.email);
-    await page.locator('input[type="password"]').fill(credentials.password);
-    await page.locator('button[type="submit"]').click();
-    await page.waitForURL(/\/(onboarding)?$/);
-    if (page.url().endsWith("/onboarding")) {
-      await page.getByRole("button", { name: "PT Lalu Lintas Uji" }).click();
-      await page.waitForURL(/\/$/);
-    }
-    for (const path of [pick(UI_PAGES), pick(UI_PAGES), pick(UI_PAGES)]) {
-      await page.goto(`${UI}${path}`, { waitUntil: "networkidle" });
-      check(page, { [`ui ${path} shows the app`]: (p) => !p.url().includes("/login") });
-    }
-  } finally {
-    await page.close();
   }
 }
