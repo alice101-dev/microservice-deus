@@ -8,3 +8,9 @@ database:
 generatedSecrets:
   - name: auth
     env: BETTER_AUTH_SECRET
+resources:
+  requests:
+    cpu: 60m
+    memory: 96Mi
+  limits:
+    memory: 256Mi

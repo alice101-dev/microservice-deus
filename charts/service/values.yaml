@@ -16,7 +16,7 @@ autoscaling:
   targetCPUUtilizationPercentage: 70
 resources:
   requests:
-    cpu: 20m
+    cpu: 30m
     memory: 96Mi
   limits:
     memory: 256Mi
