@@ -1,4 +1,4 @@
-import { type Attributes, metrics, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
+import { type Attributes, metrics, type Span, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import { sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import pg from "pg";
@@ -48,28 +48,32 @@ function instrumentQueries(target: pg.Pool | pg.PoolClient, base: Attributes, { 
     const text = queryText(args);
     const operation = operationName(text);
     const attributes: Attributes = { ...base, "db.operation.name": operation };
-    return tracer.startActiveSpan(
-      `${operation} ${base["db.namespace"]}`,
-      { kind: SpanKind.CLIENT, attributes: { ...attributes, "db.query.text": text } },
-      async (span) => {
-        const started = performance.now();
-        try {
-          const result = (await original(...args)) as pg.QueryResult;
-          if (typeof result?.rowCount === "number") span.setAttribute("db.response.returned_rows", result.rowCount);
-          return result;
-        } catch (error) {
-          const code = (error as { code?: string }).code;
-          attributes["error.type"] = code ?? (error as Error).name;
+    const measured = async (span?: Span) => {
+      const started = performance.now();
+      try {
+        const result = (await original(...args)) as pg.QueryResult;
+        if (typeof result?.rowCount === "number") span?.setAttribute("db.response.returned_rows", result.rowCount);
+        return result;
+      } catch (error) {
+        const code = (error as { code?: string }).code;
+        attributes["error.type"] = code ?? (error as Error).name;
+        if (span) {
           if (code) span.setAttribute("db.response.status_code", code);
           span.setAttribute("error.type", String(attributes["error.type"]));
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
-          throw error;
-        } finally {
-          duration.record((performance.now() - started) / 1000, attributes);
-          span.end();
         }
-      },
+        throw error;
+      } finally {
+        duration.record((performance.now() - started) / 1000, attributes);
+        span?.end();
+      }
+    };
+    if (!trace.getActiveSpan()) return measured();
+    return tracer.startActiveSpan(
+      `${operation} ${base["db.namespace"]}`,
+      { kind: SpanKind.CLIENT, attributes: { ...attributes, "db.query.text": text } },
+      measured,
     );
   };
 }

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startTestTelemetry } from "@deus/telemetry/testing";
-import { SpanKind } from "@opentelemetry/api";
+import { SpanKind, trace } from "@opentelemetry/api";
 import { sql } from "drizzle-orm";
 import pg from "pg";
 import { createDatabase, createPool, operationName, readiness, withTenant } from "../src";
@@ -97,10 +97,17 @@ describe.skipIf(!url)("against PostgreSQL", () => {
       applicationName: "db-test",
     });
     try {
-      await assertTenantIsolation(createDatabase(pool, {}));
+      const db = createDatabase(pool, {});
+      await trace.getTracer("db-test").startActiveSpan("request", async (request) => {
+        await assertTenantIsolation(db);
+        request.end();
+      });
       await readiness(pool)();
-      const probes = spans.getFinishedSpans().filter((span) => span.attributes["db.query.text"] === "select 1");
-      expect(probes).toHaveLength(0);
+      await db.execute(sql`select 2 as background`);
+      const unparented = spans
+        .getFinishedSpans()
+        .filter((span) => ["select 1", "select 2 as background"].includes(String(span.attributes["db.query.text"])));
+      expect(unparented).toHaveLength(0);
     } finally {
       await pool.end();
     }

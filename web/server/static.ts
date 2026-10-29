@@ -17,7 +17,7 @@ export function createWebServer(options: ServiceOptions & { root: string }) {
   const respond = (file: Blob, cacheControl: string, status = 200) =>
     new Response(file, { status, headers: { ...SECURITY_HEADERS, "cache-control": cacheControl } });
 
-  return createService(options).get(
+  return createService({ ...options, traceRequests: false }).get(
     "/*",
     async ({ request }) => {
       const pathname = decodeURIComponent(new URL(request.url).pathname);

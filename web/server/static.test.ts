@@ -7,7 +7,7 @@ import { createLogger } from "@deus/logger";
 import { startTestTelemetry } from "@deus/telemetry/testing";
 import { createWebServer } from "./static.ts";
 
-const { telemetry } = startTestTelemetry("web-test");
+const { telemetry, spans } = startTestTelemetry("web-test");
 afterAll(() => telemetry.shutdown());
 
 let root = "";
@@ -31,6 +31,14 @@ afterAll(() => rm(root, { recursive: true, force: true }));
 const get = (path: string) => app.handle(new Request(`http://localhost${path}`));
 
 describe("web server", () => {
+  test("serves files without server spans", async () => {
+    spans.reset();
+    await get("/");
+    await get("/_app/immutable/entry/start.abc.js");
+    await Bun.sleep(20);
+    expect(spans.getFinishedSpans()).toHaveLength(0);
+  });
+
   test("serves hashed assets as immutable and other files without caching", async () => {
     const asset = await get("/_app/immutable/entry/start.abc.js");
     expect(asset.status).toBe(200);

@@ -13,6 +13,7 @@ export interface ServiceOptions {
   config: BaseConfig;
   logger: Logger;
   readiness?: ReadinessCheck[];
+  traceRequests?: boolean;
 }
 
 export interface ServiceState {
@@ -65,7 +66,8 @@ export function createService(options: ServiceOptions) {
     .use(
       opentelemetry({
         serviceName: config.SERVICE_NAME,
-        checkIfShouldTrace: (request) => !new URL(request.url).pathname.startsWith(HEALTH),
+        checkIfShouldTrace: (request) =>
+          options.traceRequests !== false && !new URL(request.url).pathname.startsWith(HEALTH),
       }),
     )
     .use(

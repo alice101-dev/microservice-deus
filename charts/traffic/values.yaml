@@ -2,12 +2,12 @@ environment: staging
 k6:
   image:
     repository: grafana/k6
-    tag: 2.3.0
+    tag: 2.3.0-with-browser
 baseUrl: http://edge.kgateway-system.svc.cluster.local.
 authOrigin: http://localhost:8080
 resources:
   requests:
-    cpu: 20m
-    memory: 96Mi
+    cpu: 100m
+    memory: 512Mi
   limits:
-    memory: 256Mi
+    memory: 1536Mi
