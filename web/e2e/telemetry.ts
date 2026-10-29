@@ -1,3 +1,4 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
 
@@ -33,6 +34,12 @@ type OtlpSpan = { traceId: string; spanId: string; parentSpanId?: string; name: 
 type OtlpAttribute = { key: string; value: { stringValue?: string; intValue?: string } };
 const exported: Array<{ resource: Record<string, string>; span: OtlpSpan }> = [];
 const logged: Array<Record<string, string>> = [];
+const DUMP = process.env.OTLP_DUMP;
+if (DUMP) mkdirSync(DUMP, { recursive: true });
+let dumped = 0;
+const dump = (signal: string, body: unknown) => {
+  if (DUMP) writeFileSync(join(DUMP, `${signal}-${String(++dumped).padStart(3, "0")}.json`), JSON.stringify(body));
+};
 const flat = (attributes: OtlpAttribute[] = []) =>
   Object.fromEntries(attributes.map((a) => [a.key, a.value.stringValue ?? a.value.intValue ?? ""]));
 
@@ -46,6 +53,7 @@ await page.route("**/otlp/v1/traces", async (route) => {
   const body = route.request().postDataJSON() as {
     resourceSpans: Array<{ resource: { attributes: OtlpAttribute[] }; scopeSpans: Array<{ spans: OtlpSpan[] }> }>;
   };
+  dump("traces", body);
   for (const resourceSpan of body.resourceSpans) {
     for (const scope of resourceSpan.scopeSpans) {
       for (const span of scope.spans) exported.push({ resource: flat(resourceSpan.resource.attributes), span });
@@ -59,6 +67,7 @@ await page.route("**/otlp/v1/logs", async (route) => {
       scopeLogs: Array<{ logRecords: Array<{ attributes?: OtlpAttribute[]; body?: { stringValue?: string } }> }>;
     }>;
   };
+  dump("logs", body);
   for (const resource of body.resourceLogs) {
     for (const scope of resource.scopeLogs) {
       for (const record of scope.logRecords)
