@@ -160,7 +160,7 @@ through the same gateway as the API, so the browser talks to one origin.
 ## Traffic
 
 `charts/traffic` runs k6 in the cluster (`deus-traffic`) so the dashboards, SLOs and alerts always have requests to
-measure. It calls the services through the edge gateway, like the browser does:
+measure. It calls the services through the Gateway kgateway-public, like the browser does:
 
 - **setup**: registers a new user and organization, fills the profile, creates the default chart, five customers
   (one with an email, so invoices reach the notification service), two vendors and five products.

@@ -48,7 +48,7 @@ route:
   enabled: false
   pathPrefix: ""
   gateway:
-    name: edge
+    name: kgateway-public
     namespace: kgateway-system
     sectionName: http
 serviceIdentity:
