@@ -53,8 +53,10 @@ spec:
               value: {{ required "ratePerMinute.ui is required" $rate.ui | quote }}
             - name: HOME
               value: /tmp
+            - name: UI_URL
+              value: {{ trimSuffix "." .Values.baseUrl | quote }}
             - name: K6_BROWSER_ARGS
-              value: no-sandbox
+              value: {{ printf "no-sandbox,unsafely-treat-insecure-origin-as-secure=%s" (trimSuffix "." .Values.baseUrl) | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
