@@ -28,6 +28,16 @@
         "@deus/telemetry": "workspace:*",
       },
     },
+    "packages/cache": {
+      "name": "@deus/cache",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opentelemetry/api": "1.10.0",
+      },
+      "devDependencies": {
+        "@deus/telemetry": "workspace:*",
+      },
+    },
     "packages/clients": {
       "name": "@deus/clients",
       "version": "0.0.0",
@@ -121,6 +131,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@deus/auth": "workspace:*",
+        "@deus/cache": "workspace:*",
         "@deus/config": "workspace:*",
         "@deus/db": "workspace:*",
         "@deus/http": "workspace:*",
@@ -151,6 +162,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@deus/auth": "workspace:*",
+        "@deus/cache": "workspace:*",
         "@deus/db": "workspace:*",
         "@deus/errors": "workspace:*",
         "@deus/http": "workspace:*",
@@ -215,6 +227,7 @@
       "name": "@deus/identity",
       "version": "0.0.0",
       "dependencies": {
+        "@deus/cache": "workspace:*",
         "@deus/config": "workspace:*",
         "@deus/db": "workspace:*",
         "@deus/errors": "workspace:*",
@@ -577,6 +590,8 @@
     "@deus/auth": ["@deus/auth@workspace:packages/auth"],
 
     "@deus/banking": ["@deus/banking@workspace:services/banking"],
+
+    "@deus/cache": ["@deus/cache@workspace:packages/cache"],
 
     "@deus/clients": ["@deus/clients@workspace:packages/clients"],
 

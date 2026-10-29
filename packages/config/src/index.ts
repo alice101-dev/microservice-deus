@@ -49,3 +49,7 @@ export const DatabaseConfig = {
   DB_PASSWORD: Type.String({ minLength: 1 }),
   DB_MAX_CONNECTIONS: Type.Integer({ default: 5, minimum: 1 }),
 };
+
+export const CacheConfig = {
+  REDIS_URL: Type.Optional(Type.String({ minLength: 1 })),
+};

@@ -5,3 +5,5 @@ route:
   pathPrefix: /api/accounts
 database:
   enabled: true
+cache:
+  enabled: true

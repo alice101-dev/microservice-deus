@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { ServiceVerifier, Verifier } from "@deus/auth";
+import { createCache } from "@deus/cache";
 import { loadConfig } from "@deus/config";
 import { createTestDatabase } from "@deus/db/testing";
 import { createLogger } from "@deus/logger";
@@ -15,6 +16,7 @@ afterAll(() => telemetry.shutdown());
 
 const ORG_A = "00000000-0000-4000-8000-00000000000a";
 const ORG_B = "00000000-0000-4000-8000-00000000000b";
+const ORG_C = "00000000-0000-4000-8000-00000000000c";
 const verify: Verifier = async (token) => ({
   userId: "00000000-0000-4000-8000-000000000001",
   email: "user@example.com",
@@ -30,6 +32,11 @@ const verifyService: ServiceVerifier = async (token) => {
 describe.skipIf(!url)("accounts against PostgreSQL", () => {
   let database: Awaited<ReturnType<typeof createTestDatabase<typeof schema>>>;
   let app: ReturnType<typeof createApp>;
+  const cache = createCache({
+    url: process.env.REDIS_TEST_URL,
+    prefix: `accounts-test-${process.pid}`,
+    logger: createLogger({ name: "accounts" }),
+  });
   const call = (path: string, token: string | undefined, init: { method?: string; body?: unknown } = {}) =>
     app.handle(
       new Request(`http://localhost/api/accounts${path}`, {
@@ -49,15 +56,40 @@ describe.skipIf(!url)("accounts against PostgreSQL", () => {
       serviceDirectory: join(import.meta.dir, ".."),
       schema,
     });
+    await cache.ready();
     app = createApp({
       config: loadConfig({}, { SERVICE_NAME: "accounts" }),
       logger: createLogger({ name: "accounts" }),
       db: database.db,
+      cache,
       verify,
       verifyService,
     });
   });
-  afterAll(() => database.cleanup());
+  afterAll(async () => {
+    cache.close();
+    await database.cleanup();
+  });
+
+  test("serves the chart from the cache and refreshes it after a change", async () => {
+    type Row = { id: string; code: string; name: string; postable: boolean };
+    const chart = async () => (await (await call("/", ORG_C)).json()) as Row[];
+    expect((await call("/defaults", ORG_C, { method: "POST" })).status).toBe(201);
+    const before = await chart();
+    if (cache.enabled) expect(await cache.get(`chart:${ORG_C}`)).not.toBeNull();
+    const expenses = before.find((row) => row.code === "6-0000");
+    const created = await call("/", ORG_C, {
+      method: "POST",
+      body: { code: "6-9100", name: "Beban Cache", type: "expense", parentId: expenses?.id },
+    });
+    expect(created.status).toBe(201);
+    const added = (await chart()).find((row) => row.code === "6-9100");
+    expect(added?.name).toBe("Beban Cache");
+    await call(`/${added?.id}`, ORG_C, { method: "PATCH", body: { name: "Beban Cache Baru" } });
+    expect((await chart()).find((row) => row.code === "6-9100")?.name).toBe("Beban Cache Baru");
+    const lookup = (await (await call(`/lookup?id=${added?.id}`, ORG_C)).json()) as Row[];
+    expect(lookup.map((row) => row.name)).toEqual(["Beban Cache Baru"]);
+  });
 
   test("creates the default chart once, with its hierarchy", async () => {
     const created = await call("/defaults", ORG_A, { method: "POST" });

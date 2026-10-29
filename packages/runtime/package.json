@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@deus/auth": "workspace:*",
+    "@deus/cache": "workspace:*",
     "@deus/config": "workspace:*",
     "@deus/db": "workspace:*",
     "@deus/http": "workspace:*",

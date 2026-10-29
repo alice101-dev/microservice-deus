@@ -14,3 +14,5 @@ resources:
     memory: 96Mi
   limits:
     memory: 256Mi
+cache:
+  enabled: true

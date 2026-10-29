@@ -1,5 +1,6 @@
+import type { Cache } from "@deus/cache";
 import type { Logger } from "@deus/logger";
-import { betterAuth } from "better-auth";
+import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { jwt, organization } from "better-auth/plugins";
 
@@ -9,6 +10,21 @@ export interface AuthSettings {
   trustedOrigins: string[];
   issuer: string;
   logger?: Logger;
+  storage?: Cache;
+}
+
+function sharedStorage(storage: Cache | undefined): Pick<BetterAuthOptions, "secondaryStorage" | "rateLimit"> {
+  if (!storage?.enabled) return {};
+  return {
+    secondaryStorage: {
+      get: (key: string) => storage.get(key),
+      getAndDelete: (key: string) => storage.getAndDelete(key),
+      increment: (key: string, ttl: number) => storage.increment(key, ttl),
+      set: (key: string, value: string, ttl?: number) => storage.set(key, value, ttl),
+      delete: (key: string) => storage.del(key),
+    },
+    rateLimit: { storage: "secondary-storage" },
+  };
 }
 
 function authLogger(logger: Logger | undefined) {
@@ -35,10 +51,11 @@ export function authOptions(settings: AuthSettings) {
     secret: settings.secret,
     trustedOrigins: settings.trustedOrigins,
     emailAndPassword: { enabled: true, minPasswordLength: 12, autoSignIn: true },
-    session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
+    session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24, storeSessionInDatabase: true },
     advanced: { database: { generateId: "uuid" as const }, cookiePrefix: "deus" },
     telemetry: { enabled: false },
     logger: authLogger(settings.logger),
+    ...sharedStorage(settings.storage),
     plugins: [
       organization({ allowUserToCreateOrganization: true, creatorRole: "owner" }),
       jwt({

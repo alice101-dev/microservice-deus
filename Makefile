@@ -34,11 +34,14 @@ traffic:
 		run --no-usage-report /scripts/traffic.js
 
 test-integration:
-	@docker rm -f deus-test-postgres >/dev/null 2>&1 || true
+	@docker rm -f deus-test-postgres deus-test-redis >/dev/null 2>&1 || true
 	docker run -d --name deus-test-postgres -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:18.6-trixie >/dev/null
+	docker run -d --name deus-test-redis -p 56379:6379 redis:8.2.3-alpine --requirepass redis >/dev/null
 	@until docker exec deus-test-postgres pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
-	DATABASE_TEST_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres bun test; status=$$?; \
-		docker rm -f deus-test-postgres >/dev/null; exit $$status
+	@until docker exec deus-test-redis redis-cli -a redis --no-auth-warning ping >/dev/null 2>&1; do sleep 1; done
+	DATABASE_TEST_URL=postgres://postgres:postgres@127.0.0.1:55432/postgres \
+		REDIS_TEST_URL=redis://default:redis@127.0.0.1:56379/0 bun test; status=$$?; \
+		docker rm -f deus-test-postgres deus-test-redis >/dev/null; exit $$status
 
 chart:
 	@for s in $(APPS); do \

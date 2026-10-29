@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { createCache } from "@deus/cache";
 import { createDatabase, createPool } from "@deus/db";
 import { loadMigrations, migrate } from "@deus/db/migrate";
 import { createLogger, type Logger } from "@deus/logger";
@@ -12,6 +13,7 @@ import { loadIdentityConfig } from "../src/config";
 import { schema } from "../src/schema";
 
 const url = process.env.DATABASE_TEST_URL;
+const redisUrl = process.env.REDIS_TEST_URL;
 const { telemetry } = startTestTelemetry("identity");
 afterAll(() => telemetry.shutdown());
 
@@ -74,6 +76,55 @@ describe.skipIf(!url)("identity against PostgreSQL", () => {
     await admin.query(`drop database if exists ${database} with (force)`);
     await admin.query("drop role if exists identity_app");
     await admin.end();
+  });
+
+  test.skipIf(!redisUrl)("keeps sessions in Redis and falls back to PostgreSQL without it", async () => {
+    const quiet = { info: () => {}, warn: () => {} };
+    const settings = {
+      baseURL: config.AUTH_BASE_URL,
+      secret: config.BETTER_AUTH_SECRET,
+      trustedOrigins: [],
+      issuer: config.AUTH_ISSUER,
+    };
+    const cache = createCache({ url: redisUrl, prefix: `identity-test-${process.pid}`, logger: quiet });
+    const gone = createCache({ url: "redis://127.0.0.1:1/0", prefix: "identity-test", timeoutMs: 100, logger: quiet });
+    await cache.ready();
+    const instance = (storage: typeof cache) =>
+      createApp(
+        config,
+        createLogger({ name: "identity" }),
+        createAuth({ ...settings, storage }, createDatabase(pool, schema), schema),
+      );
+    const withRedis = instance(cache);
+    const withoutRedis = instance(gone);
+    const send = (target: typeof app, path: string, init: RequestInit = {}) =>
+      target.handle(new Request(`http://localhost${path}`, init));
+    const sessionCookie = (response: Response) =>
+      (response.headers.getSetCookie() ?? []).map((value) => value.split(";")[0]).join("; ");
+
+    const signUp = await send(
+      withRedis,
+      "/api/identity/auth/sign-up/email",
+      json({ email: "cached@example.com", password: "correct horse battery", name: "Cached" }),
+    );
+    expect(signUp.status).toBe(200);
+    const cookie = sessionCookie(signUp);
+    const token = decodeURIComponent(cookie.split("deus.session_token=")[1]?.split(";")[0] ?? "").split(".")[0] ?? "";
+    expect(await cache.get(token)).not.toBeNull();
+    expect((await send(withRedis, "/api/identity/me", { headers: { cookie } })).status).toBe(200);
+
+    expect((await send(withoutRedis, "/api/identity/me", { headers: { cookie } })).status).toBe(200);
+    const signIn = await send(
+      withoutRedis,
+      "/api/identity/auth/sign-in/email",
+      json({ email: "cached@example.com", password: "correct horse battery" }),
+    );
+    expect(signIn.status).toBe(200);
+    expect((await send(withoutRedis, "/api/identity/me", { headers: { cookie: sessionCookie(signIn) } })).status).toBe(
+      200,
+    );
+    cache.close();
+    gone.close();
   });
 
   test("signs up, creates an organization and issues a token verifiable with the JWKS", async () => {

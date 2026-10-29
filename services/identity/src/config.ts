@@ -1,8 +1,9 @@
-import { DatabaseConfig, loadConfig } from "@deus/config";
+import { CacheConfig, DatabaseConfig, loadConfig } from "@deus/config";
 import { Type } from "@sinclair/typebox";
 
 export const IdentityConfig = {
   ...DatabaseConfig,
+  ...CacheConfig,
   BETTER_AUTH_SECRET: Type.String({ minLength: 32 }),
   AUTH_BASE_URL: Type.String({ minLength: 1 }),
   AUTH_TRUSTED_ORIGINS: Type.String({ default: "" }),

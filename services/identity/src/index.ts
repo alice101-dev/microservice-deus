@@ -1,3 +1,4 @@
+import { createCache } from "@deus/cache";
 import { createDatabase, createPool, readiness } from "@deus/db";
 import { serve } from "@deus/http";
 import { createLogger } from "@deus/logger";
@@ -26,6 +27,7 @@ const pool = createPool({
   applicationName: config.SERVICE_NAME,
   maxConnections: config.DB_MAX_CONNECTIONS,
 });
+const cache = createCache({ url: config.REDIS_URL, prefix: config.SERVICE_NAME, logger });
 const auth = createAuth(
   {
     baseURL: config.AUTH_BASE_URL,
@@ -33,9 +35,18 @@ const auth = createAuth(
     trustedOrigins: config.AUTH_TRUSTED_ORIGINS.split(",").filter(Boolean),
     issuer: config.AUTH_ISSUER,
     logger,
+    storage: cache,
   },
   createDatabase(pool, schema),
   schema,
 );
 
-serve(createApp(config, logger, auth, [readiness(pool)]), { config, logger, telemetry, onShutdown: () => pool.end() });
+serve(createApp(config, logger, auth, [readiness(pool)]), {
+  config,
+  logger,
+  telemetry,
+  onShutdown: () => {
+    cache.close();
+    return pool.end();
+  },
+});

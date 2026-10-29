@@ -29,6 +29,9 @@ database:
   cluster: deus-db
   port: 5432
   maxConnections: 5
+cache:
+  enabled: false
+  secret: redis
 migrations:
   activeDeadlineSeconds: 600
   resources:

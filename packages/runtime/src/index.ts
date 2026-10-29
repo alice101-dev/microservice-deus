@@ -7,7 +7,8 @@ import {
   serviceTokenSource,
   type Verifier,
 } from "@deus/auth";
-import { type BaseConfig, DatabaseConfig, loadConfig } from "@deus/config";
+import { type Cache, createCache } from "@deus/cache";
+import { type BaseConfig, CacheConfig, DatabaseConfig, loadConfig } from "@deus/config";
 import { createDatabase, createPool, type Database, readiness } from "@deus/db";
 import { runMigrationJob } from "@deus/db/migrate";
 import { serve } from "@deus/http";
@@ -24,7 +25,7 @@ export const AuthConfig = {
   SERVICE_IDENTITY_DIR: Type.String({ default: "/var/run/secrets/deus" }),
 };
 
-const ServiceConfig = { ...DatabaseConfig, ...AuthConfig };
+const ServiceConfig = { ...DatabaseConfig, ...AuthConfig, ...CacheConfig };
 const ServiceSchema = Type.Object(ServiceConfig);
 
 export type ServiceConfig<P extends TProperties> = BaseConfig & Static<typeof ServiceSchema> & Static<TObject<P>>;
@@ -34,6 +35,7 @@ export interface ServiceContext<P extends TProperties, S extends Record<string, 
   logger: Logger;
   telemetry: Telemetry;
   db: Database<S>;
+  cache: Cache;
   verify: Verifier;
   verifyService: ServiceVerifier;
   serviceToken: () => Promise<string>;
@@ -84,12 +86,14 @@ export function startService<P extends TProperties, S extends Record<string, unk
     tokenFile: join(identity, "kube/token"),
     caFile: join(identity, "kube/ca.crt"),
   });
+  const cache = createCache({ url: config.REDIS_URL, prefix: config.SERVICE_NAME, logger });
   const shutdownHooks: Array<() => Promise<void> | void> = [];
   const app = options.build({
     config,
     logger,
     telemetry,
     db: createDatabase(pool, options.schema),
+    cache,
     verify,
     verifyService: createServiceVerifier({ ...kubernetes, namespace: config.POD_NAMESPACE }),
     serviceToken: serviceTokenSource(join(identity, "service/token")),
@@ -104,6 +108,7 @@ export function startService<P extends TProperties, S extends Record<string, unk
     telemetry,
     onShutdown: async () => {
       for (const hook of shutdownHooks) await hook();
+      cache.close();
       await pool.end();
     },
   });

@@ -6,12 +6,13 @@ import {
   serviceAuthentication,
   type Verifier,
 } from "@deus/auth";
+import { type Cache, createCache } from "@deus/cache";
 import type { BaseConfig } from "@deus/config";
 import { type Database, isUniqueViolation, type Transaction, withTenant } from "@deus/db";
 import { ConflictError, NotFoundError, UnprocessableError } from "@deus/errors";
 import { createService } from "@deus/http";
 import type { Logger } from "@deus/logger";
-import { asc, eq, inArray, isNotNull } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { t } from "elysia";
 import { DEFAULT_CHART } from "./defaults";
 import { ACCOUNT_TYPES, type Account, accounts, type schema } from "./schema";
@@ -20,6 +21,7 @@ export interface AccountsContext {
   config: BaseConfig;
   logger: Logger;
   db: Database<typeof schema>;
+  cache?: Cache;
   verify: Verifier;
   verifyService: ServiceVerifier;
   readiness?: Array<() => Promise<void>>;
@@ -74,30 +76,44 @@ export const LOOKUP_CALLERS = [
   "reporting",
 ] as const;
 const Code = t.String({ pattern: "^[0-9A-Za-z][0-9A-Za-z.-]{0,19}$" });
+const CHART_TTL_SECONDS = 300;
+type AccountViewRow = ReturnType<typeof view>;
 
 export function createApp(context: AccountsContext) {
   const { db } = context;
+  const cache = context.cache ?? createCache({ prefix: "accounts", logger: context.logger });
   const tenant = <T>(principal: Principal, work: Parameters<typeof withTenant<typeof schema, T>>[2]) =>
     withTenant(db, requireOrganization(principal), work);
+  const chart = (organizationId: string): Promise<AccountViewRow[]> =>
+    cache.remember(`chart:${organizationId}`, CHART_TTL_SECONDS, () =>
+      withTenant(db, organizationId, async (tx) =>
+        views(tx, await tx.select().from(accounts).orderBy(asc(accounts.code))),
+      ),
+    );
+  const forget = (organizationId: string) => cache.del(`chart:${organizationId}`);
+  const byId = async (organizationId: string, ids: string[]) => {
+    const found = (await chart(organizationId)).filter((account) => ids.includes(account.id));
+    if (found.length === new Set(ids).size) return found;
+    return withTenant(db, organizationId, async (tx) =>
+      views(tx, await tx.select().from(accounts).where(inArray(accounts.id, ids))),
+    );
+  };
+  const byCode = async (organizationId: string, codes: string[]) => {
+    const found = (await chart(organizationId)).filter((account) => codes.includes(account.code));
+    if (found.length === new Set(codes).size) return found;
+    return withTenant(db, organizationId, async (tx) =>
+      views(tx, await tx.select().from(accounts).where(inArray(accounts.code, codes))),
+    );
+  };
 
   return createService({ config: context.config, logger: context.logger, readiness: context.readiness })
     .group("/api/accounts", (api) =>
       api
         .use(authentication(context.verify))
-        .get(
-          "/",
-          async ({ principal }) => {
-            return tenant(principal, async (tx) => {
-              const rows = await tx.select().from(accounts).orderBy(asc(accounts.code));
-              const parents = await tx
-                .selectDistinct({ id: accounts.parentId })
-                .from(accounts)
-                .where(isNotNull(accounts.parentId));
-              return rows.map((row) => view(row, new Set(parents.map((parent) => parent.id as string))));
-            });
-          },
-          { response: t.Array(AccountView), detail: { summary: "Chart of accounts of the active organization" } },
-        )
+        .get("/", ({ principal }) => chart(requireOrganization(principal)), {
+          response: t.Array(AccountView),
+          detail: { summary: "Chart of accounts of the active organization" },
+        })
         .post(
           "/",
           async ({ principal, body, set }) => {
@@ -122,6 +138,7 @@ export function createApp(context: AccountsContext) {
                   .returning();
                 return view(row as Account, new Set());
               });
+              await forget(organizationId);
               set.status = 201;
               return created;
             } catch (error) {
@@ -154,6 +171,7 @@ export function createApp(context: AccountsContext) {
               ),
             );
             if (!updated) throw new NotFoundError("The account does not exist");
+            await forget(requireOrganization(principal));
             return updated;
           },
           {
@@ -193,6 +211,7 @@ export function createApp(context: AccountsContext) {
               }
               return views(tx, rows);
             });
+            await forget(organizationId);
             set.status = 201;
             return created;
           },
@@ -201,74 +220,32 @@ export function createApp(context: AccountsContext) {
             detail: { summary: "Create the default Indonesian SME chart of accounts" },
           },
         )
-        .get(
-          "/lookup",
-          async ({ principal, query }) => {
-            const ids = [query.id].flat();
-            return tenant(principal, async (tx) =>
-              views(tx, await tx.select().from(accounts).where(inArray(accounts.id, ids))),
-            );
-          },
-          {
-            query: t.Object({ id: Ids }),
-            response: t.Array(AccountView),
-            detail: { summary: "Accounts by id, for other services" },
-          },
-        ),
+        .get("/lookup", ({ principal, query }) => byId(requireOrganization(principal), [query.id].flat()), {
+          query: t.Object({ id: Ids }),
+          response: t.Array(AccountView),
+          detail: { summary: "Accounts by id, for other services" },
+        }),
     )
     .group("/internal/accounts", (internal) =>
       internal
         .use(serviceAuthentication(context.verifyService, LOOKUP_CALLERS))
-        .get(
-          "/lookup",
-          ({ query }) =>
-            withTenant(db, query.organizationId, async (tx) =>
-              views(
-                tx,
-                await tx
-                  .select()
-                  .from(accounts)
-                  .where(inArray(accounts.id, [query.id].flat())),
-              ),
-            ),
-          {
-            query: t.Object({ organizationId: t.String({ format: "uuid" }), id: Ids }),
-            response: t.Array(AccountView),
-            detail: { summary: "Accounts of an organization by id, for other services" },
-          },
-        )
-        .get(
-          "/chart",
-          ({ query }) =>
-            withTenant(db, query.organizationId, async (tx) =>
-              views(tx, await tx.select().from(accounts).orderBy(asc(accounts.code))),
-            ),
-          {
-            query: t.Object({ organizationId: t.String({ format: "uuid" }) }),
-            response: t.Array(AccountView),
-            detail: { summary: "The whole chart of accounts of an organization, for other services" },
-          },
-        )
-        .get(
-          "/by-code",
-          ({ query }) =>
-            withTenant(db, query.organizationId, async (tx) =>
-              views(
-                tx,
-                await tx
-                  .select()
-                  .from(accounts)
-                  .where(inArray(accounts.code, [query.code].flat())),
-              ),
-            ),
-          {
-            query: t.Object({
-              organizationId: t.String({ format: "uuid" }),
-              code: t.Union([Code, t.Array(Code, { minItems: 1, maxItems: 50 })]),
-            }),
-            response: t.Array(AccountView),
-            detail: { summary: "Accounts of an organization by code, for other services" },
-          },
-        ),
+        .get("/lookup", ({ query }) => byId(query.organizationId, [query.id].flat()), {
+          query: t.Object({ organizationId: t.String({ format: "uuid" }), id: Ids }),
+          response: t.Array(AccountView),
+          detail: { summary: "Accounts of an organization by id, for other services" },
+        })
+        .get("/chart", ({ query }) => chart(query.organizationId), {
+          query: t.Object({ organizationId: t.String({ format: "uuid" }) }),
+          response: t.Array(AccountView),
+          detail: { summary: "The whole chart of accounts of an organization, for other services" },
+        })
+        .get("/by-code", ({ query }) => byCode(query.organizationId, [query.code].flat()), {
+          query: t.Object({
+            organizationId: t.String({ format: "uuid" }),
+            code: t.Union([Code, t.Array(Code, { minItems: 1, maxItems: 50 })]),
+          }),
+          response: t.Array(AccountView),
+          detail: { summary: "Accounts of an organization by code, for other services" },
+        }),
     );
 }
