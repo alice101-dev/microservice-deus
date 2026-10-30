@@ -110,6 +110,23 @@ describe("interactions", () => {
     expect(parents).toEqual([navigation?.spanContext().spanId]);
   });
 
+  test("an action ends when its last request settled, not when the idle wait ran out", async () => {
+    window.fetch = vi.fn(
+      () => new Promise<Response>((resolve) => setTimeout(() => resolve(new Response("{}")), 300)),
+    ) as unknown as typeof fetch;
+    interactions.instrumentInteractions(/\/otlp\//);
+    await settle(1100);
+    exporter.reset();
+    interactions.startInteraction("click Simpan", { "ui.action": "click" });
+    await Promise.all([window.fetch("/api/sales/invoices", { method: "POST" }), settle(300)]);
+    await settle(1100);
+    const [span] = exporter.getFinishedSpans();
+    const ms = (span?.duration[0] ?? 0) * 1000 + (span?.duration[1] ?? 0) / 1e6;
+    expect(span?.name).toBe("click Simpan");
+    expect(ms).toBeGreaterThanOrEqual(300);
+    expect(ms).toBeLessThan(400);
+  });
+
   test("a back navigation, or one without a click, starts its own trace", async () => {
     interactions.instrumentInteractions(/\/otlp\//);
     await settle(1100);

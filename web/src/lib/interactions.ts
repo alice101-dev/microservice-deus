@@ -25,6 +25,7 @@ interface Interaction {
   children: Span[];
   context: Context;
   inflight: number;
+  lastActivity: Date;
   idle?: ReturnType<typeof setTimeout>;
   max: ReturnType<typeof setTimeout>;
 }
@@ -54,8 +55,8 @@ function finish(interaction: Interaction | undefined = current) {
   if (!interaction) return;
   clearTimeout(interaction.idle);
   clearTimeout(interaction.max);
-  for (const child of interaction.children.reverse()) child.end();
-  interaction.span.end();
+  for (const child of interaction.children.reverse()) child.end(interaction.lastActivity);
+  interaction.span.end(interaction.lastActivity);
   if (current === interaction) current = undefined;
 }
 
@@ -84,6 +85,7 @@ export function startInteraction(name: string, attributes: Attributes = {}): Spa
     children: [],
     context: trace.setSpan(ROOT_CONTEXT, span),
     inflight: 0,
+    lastActivity: new Date(),
     max: setTimeout(() => finish(interaction), MAX_MS),
   };
   current = interaction;
@@ -130,6 +132,7 @@ export function startNavigation(type: string, fromId: string | null, toId: strin
     const span = startSpan(name, attributes, trace.setSpan(ROOT_CONTEXT, current.span));
     current.children.push(span);
     current.context = trace.setSpan(ROOT_CONTEXT, span);
+    current.lastActivity = new Date();
     return;
   }
   startInteraction(name, attributes);
@@ -164,6 +167,7 @@ export function instrumentInteractions(ignore: RegExp) {
     const response = context.with(interaction.context, () => instrumented.call(this, input, init));
     const settle = () => {
       interaction.inflight--;
+      interaction.lastActivity = new Date();
       if (current === interaction) scheduleIdle(interaction);
     };
     response.then(settle, settle);
