@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { startTestTelemetry } from "@deus/telemetry/testing";
 import { SpanKind, trace } from "@opentelemetry/api";
-import { createCache } from "../src";
+import { createCache, redisKey } from "../src";
 
 const url = process.env.REDIS_TEST_URL;
 const { telemetry, spans } = startTestTelemetry("cache-test");
@@ -16,6 +16,14 @@ test("without a URL the cache is off and every read goes to the source", async (
   expect(await cache.get("anything")).toBeNull();
   expect(await cache.remember("chart", 60, async () => ++loads)).toBe(1);
   expect(await cache.remember("chart", 60, async () => ++loads)).toBe(2);
+});
+
+test("Redis keys keep their structure while tokens, identifiers and addresses are masked", () => {
+  expect(redisKey("accounts:chart:49855adb-1da4-4abd-b1a4-ad3780c72ea8")).toBe("accounts:chart:?");
+  expect(redisKey(`identity:${"s".repeat(32)}`)).toBe("identity:?");
+  expect(redisKey("identity:active-sessions-6e57b1bb-d0fa-4306-810d-86914dca75b4")).toBe("identity:active-sessions-?");
+  expect(redisKey("identity:10.124.2.81/sign-in/email")).toBe("identity:?/sign-in/email");
+  expect(redisKey("identity:2001:db8::7334/sign-in/email")).toBe("identity:?/sign-in/email");
 });
 
 test("an unreachable Redis is a miss, warned about once", async () => {
@@ -132,12 +140,13 @@ describe.skipIf(!url)("against Redis", () => {
     expect(loads).toBe(1);
   });
 
-  test("traces commands only under a parent span, without the key", async () => {
+  test("traces commands only under a parent span, with the key masked and never the value", async () => {
+    const token = "s".repeat(32);
     spans.reset();
     await cache.get("background");
     await trace.getTracer("cache-test").startActiveSpan("request", async (request) => {
-      await cache.set("secret-session-token", "v", 60);
-      await cache.get("secret-session-token");
+      await cache.set(token, "stored-session-payload", 60);
+      await cache.get(token);
       await cache.get("missing");
       request.end();
     });
@@ -146,6 +155,13 @@ describe.skipIf(!url)("against Redis", () => {
     expect(commands.map((span) => span.name)).toEqual([`SET ${server}`, `GET ${server}`, `GET ${server}`]);
     expect(commands.every((span) => span.attributes["db.system.name"] === "redis")).toBe(true);
     expect(commands.map((span) => span.attributes["db.response.returned_rows"])).toEqual([undefined, 1, 0]);
-    expect(JSON.stringify(commands.map((span) => span.attributes))).not.toContain("secret-session-token");
+    expect(commands.map((span) => span.attributes["db.query.text"])).toEqual([
+      "SET test-?:? ? EX 60",
+      "GET test-?:?",
+      "GET test-?:missing",
+    ]);
+    const recorded = JSON.stringify(commands.map((span) => span.attributes));
+    expect(recorded).not.toContain(token);
+    expect(recorded).not.toContain("stored-session-payload");
   });
 });

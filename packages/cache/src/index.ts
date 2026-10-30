@@ -31,6 +31,18 @@ type Command = "GET" | "SET" | "DEL" | "GETDEL" | "EVAL";
 
 const RECONNECT_INTERVAL_MS = 1000;
 
+const DYNAMIC_PARTS = [
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+  /\b\d{1,3}(?:\.\d{1,3}){3}\b/g,
+  /\b[0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,7}\b/gi,
+  /[A-Za-z0-9_-]{20,}/g,
+  /\b\d+\b/g,
+];
+
+export function redisKey(key: string): string {
+  return DYNAMIC_PARTS.reduce((text, pattern) => text.replace(pattern, "?"), key);
+}
+
 const INCREMENT_WITH_TTL =
   "local value = redis.call('INCR', KEYS[1]) if value == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end return value";
 
@@ -112,7 +124,12 @@ export function createCache(options: CacheOptions): Cache {
     unavailableSince = undefined;
   };
 
-  const run = async <T>(command: Command, work: () => Promise<T>, describe?: (result: T) => Attributes): Promise<T> => {
+  const run = async <T>(
+    command: Command,
+    statement: string,
+    work: () => Promise<T>,
+    describe?: (result: T) => Attributes,
+  ): Promise<T> => {
     const attributes: Attributes = { ...base, "db.operation.name": command };
     const measured = async (span?: Span) => {
       const started = performance.now();
@@ -136,10 +153,16 @@ export function createCache(options: CacheOptions): Cache {
       }
     };
     if (!trace.getActiveSpan()) return measured();
-    return tracer.startActiveSpan(`${command} ${target}`, { kind: SpanKind.CLIENT, attributes }, measured);
+    return tracer.startActiveSpan(
+      `${command} ${target}`,
+      { kind: SpanKind.CLIENT, attributes: { ...attributes, "db.query.text": statement } },
+      measured,
+    );
   };
 
   const key = (name: string) => `${options.prefix}:${name}`;
+  const shown = (name: string) => redisKey(key(name));
+  const ttl = (seconds: number) => Math.max(1, Math.ceil(seconds));
 
   const cache: Cache = {
     enabled: true,
@@ -153,6 +176,7 @@ export function createCache(options: CacheOptions): Cache {
       try {
         const value = await run(
           "GET",
+          `GET ${shown(name)}`,
           () => client.get(key(name)),
           (result) => ({ "db.response.returned_rows": result === null ? 0 : 1 }),
         );
@@ -167,10 +191,8 @@ export function createCache(options: CacheOptions): Cache {
     },
     async set(name, value, ttlSeconds) {
       try {
-        await run("SET", () =>
-          ttlSeconds
-            ? client.set(key(name), value, "EX", Math.max(1, Math.ceil(ttlSeconds)))
-            : client.set(key(name), value),
+        await run("SET", `SET ${shown(name)} ?${ttlSeconds ? ` EX ${ttl(ttlSeconds)}` : ""}`, () =>
+          ttlSeconds ? client.set(key(name), value, "EX", ttl(ttlSeconds)) : client.set(key(name), value),
         );
         succeeded();
       } catch (error) {
@@ -179,7 +201,7 @@ export function createCache(options: CacheOptions): Cache {
     },
     async del(name) {
       try {
-        await run("DEL", () => client.del(key(name)));
+        await run("DEL", `DEL ${shown(name)}`, () => client.del(key(name)));
         succeeded();
       } catch (error) {
         failed("DEL", error);
@@ -189,6 +211,7 @@ export function createCache(options: CacheOptions): Cache {
       try {
         const value = await run(
           "GETDEL",
+          `GETDEL ${shown(name)}`,
           () => client.send("GETDEL", [key(name)]) as Promise<string | null>,
           (result) => ({ "db.response.returned_rows": result === null ? 0 : 1 }),
         );
@@ -201,8 +224,8 @@ export function createCache(options: CacheOptions): Cache {
     },
     async increment(name, ttlSeconds) {
       try {
-        const value = await run("EVAL", () =>
-          client.send("EVAL", [INCREMENT_WITH_TTL, "1", key(name), String(Math.max(1, Math.ceil(ttlSeconds)))]),
+        const value = await run("EVAL", `EVAL "${INCREMENT_WITH_TTL}" 1 ${shown(name)} ${ttl(ttlSeconds)}`, () =>
+          client.send("EVAL", [INCREMENT_WITH_TTL, "1", key(name), String(ttl(ttlSeconds))]),
         );
         succeeded();
         return Number(value);
