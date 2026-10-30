@@ -30,7 +30,15 @@ const session = {
   user: { id: USER, name: "Pemilik", email: EMAIL },
 };
 
-type OtlpSpan = { traceId: string; spanId: string; parentSpanId?: string; name: string; attributes?: OtlpAttribute[] };
+type OtlpSpan = {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  name: string;
+  startTimeUnixNano?: string;
+  endTimeUnixNano?: string;
+  attributes?: OtlpAttribute[];
+};
 type OtlpAttribute = { key: string; value: { stringValue?: string; intValue?: string } };
 const exported: Array<{ resource: Record<string, string>; span: OtlpSpan }> = [];
 const logged: Array<Record<string, string>> = [];
@@ -104,28 +112,27 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(2000);
 
-const fetches = exported.filter((entry) => /^(GET|POST|PUT|PATCH|DELETE) \//.test(entry.span.name));
+const byName = (name: string) => exported.find((entry) => entry.span.name === name);
 const urlOf = (entry: { span: OtlpSpan }) => {
   const attributes = flat(entry.span.attributes);
   return attributes["url.full"] ?? attributes["http.url"] ?? "";
 };
+const ms = (entry?: { span: OtlpSpan }) =>
+  entry ? (Number(entry.span.endTimeUnixNano) - Number(entry.span.startTimeUnixNano)) / 1e6 : Number.NaN;
+const pageload = byName("pageload /contacts");
+const navigation = byName("navigation /sales");
+const contacts = byName("GET /api/contacts");
+const invoices = byName("GET /api/sales/invoices");
 
+expect(pageload !== undefined && !pageload.span.parentSpanId, "the first page is a root span named pageload /contacts");
+expect(contacts?.span.parentSpanId === pageload?.span.spanId, "GET /api/contacts is a child of the page load");
 expect(
-  fetches.some((entry) => entry.span.name === "GET /api/contacts"),
-  "the contacts request of the first page is traced as GET /api/contacts",
+  navigation !== undefined && !navigation.span.parentSpanId,
+  "opening Penjualan is a root span named navigation /sales",
 );
-expect(
-  fetches.some((entry) => entry.span.name === "GET /api/sales/invoices"),
-  "the sales list request after clicking Penjualan is traced as GET /api/sales/invoices",
-);
-expect(
-  fetches.length > 0 && fetches.every((entry) => !entry.span.parentSpanId),
-  "every request from the browser starts its own trace",
-);
-expect(
-  !exported.some((entry) => /^(click|navigation|pageload)\b/.test(entry.span.name)),
-  "there are no click, navigation or page load spans",
-);
+expect(invoices?.span.parentSpanId === navigation?.span.spanId, "GET /api/sales/invoices is a child of the navigation");
+expect(ms(navigation) < 1000, "the navigation ends with its last request, not after the idle wait");
+expect(!exported.some((entry) => entry.span.name.startsWith("click")), "clicks are not spans");
 expect(
   !exported.some((entry) => entry.span.name !== "resourceFetch" && urlOf(entry).includes("/_app/")),
   "requests for the app's own files, such as the version check, are not traced",

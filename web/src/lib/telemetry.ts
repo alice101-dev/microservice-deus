@@ -9,6 +9,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs";
 import { BatchSpanProcessor, type ReadableSpan, StackContextManager, TracerProvider } from "@opentelemetry/sdk-trace";
 import { type Metric, onCLS, onFCP, onINP, onLCP, onTTFB } from "web-vitals";
+import { instrumentPages } from "./pages";
 
 export type LogLevel = "info" | "warn" | "error";
 
@@ -77,6 +78,7 @@ export function startTelemetry(options: { version: string; environment: string; 
       new DocumentLoadInstrumentation(),
     ],
   });
+  instrumentPages(UNTRACED, urlTemplate(location.pathname));
   for (const subscribe of [onLCP, onINP, onCLS, onFCP, onTTFB]) subscribe(reportVital);
   providers = [tracerProvider, loggerProvider];
   document.addEventListener("visibilitychange", () => {
