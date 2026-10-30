@@ -23,6 +23,22 @@ export function operationName(text: string): string {
   return (match?.[2] ?? "query").toUpperCase();
 }
 
+const IDENTIFIER = String.raw`((?:"[^"]+"|[a-z_][\w$]*)(?:\s*\.\s*(?:"[^"]+"|[a-z_][\w$]*))?)`;
+const TARGETS: Record<string, RegExp[]> = {
+  SELECT: [new RegExp(String.raw`\bfrom\s+${IDENTIFIER}`, "i"), /^\s*select\s+([a-z_][\w$]*)\s*\(/i],
+  DELETE: [new RegExp(String.raw`\bfrom\s+${IDENTIFIER}`, "i")],
+  INSERT: [new RegExp(String.raw`\binto\s+${IDENTIFIER}`, "i")],
+  UPDATE: [new RegExp(String.raw`\bupdate\s+${IDENTIFIER}`, "i")],
+};
+
+export function queryTarget(text: string, operation: string): string | undefined {
+  for (const pattern of TARGETS[operation] ?? []) {
+    const match = text.match(pattern)?.[1];
+    if (match) return match.split(".").pop()?.trim().replaceAll('"', "");
+  }
+  return undefined;
+}
+
 function queryText(args: unknown[]): string {
   const first = args[0];
   if (typeof first === "string") return first;
@@ -47,6 +63,7 @@ function instrumentQueries(target: pg.Pool | pg.PoolClient, base: Attributes, { 
     if (typeof args[args.length - 1] === "function") return original(...args);
     const text = queryText(args);
     const operation = operationName(text);
+    const target = queryTarget(text, operation);
     const attributes: Attributes = { ...base, "db.operation.name": operation };
     const measured = async (span?: Span) => {
       const started = performance.now();
@@ -71,8 +88,11 @@ function instrumentQueries(target: pg.Pool | pg.PoolClient, base: Attributes, { 
     };
     if (!trace.getActiveSpan()) return measured();
     return tracer.startActiveSpan(
-      `${operation} ${base["db.namespace"]}`,
-      { kind: SpanKind.CLIENT, attributes: { ...attributes, "db.query.text": text } },
+      target ? `${operation} ${target}` : operation,
+      {
+        kind: SpanKind.CLIENT,
+        attributes: { ...attributes, "db.query.text": text, ...(target ? { "db.collection.name": target } : {}) },
+      },
       measured,
     );
   };

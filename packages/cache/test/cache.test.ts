@@ -142,7 +142,8 @@ describe.skipIf(!url)("against Redis", () => {
       request.end();
     });
     const commands = spans.getFinishedSpans().filter((span) => span.kind === SpanKind.CLIENT);
-    expect(commands.map((span) => span.name)).toEqual(["SET", "GET", "GET"]);
+    const server = `${new URL(url as string).hostname}:${new URL(url as string).port}`;
+    expect(commands.map((span) => span.name)).toEqual([`SET ${server}`, `GET ${server}`, `GET ${server}`]);
     expect(commands.every((span) => span.attributes["db.system.name"] === "redis")).toBe(true);
     expect(commands.map((span) => span.attributes["db.response.returned_rows"])).toEqual([undefined, 1, 0]);
     expect(JSON.stringify(commands.map((span) => span.attributes))).not.toContain("secret-session-token");

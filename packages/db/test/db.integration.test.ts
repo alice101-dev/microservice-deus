@@ -6,7 +6,7 @@ import { startTestTelemetry } from "@deus/telemetry/testing";
 import { SpanKind, trace } from "@opentelemetry/api";
 import { sql } from "drizzle-orm";
 import pg from "pg";
-import { createDatabase, createPool, operationName, readiness, withTenant } from "../src";
+import { createDatabase, createPool, operationName, queryTarget, readiness, withTenant } from "../src";
 import { loadMigrations, MigrationError, migrate } from "../src/migrate";
 
 const url = process.env.DATABASE_TEST_URL;
@@ -17,6 +17,18 @@ test("names the operation of a statement", () => {
   expect(operationName("select 1")).toBe("SELECT");
   expect(operationName("  insert into t values (1)")).toBe("INSERT");
   expect(operationName("with x as (select 1) update t set a = 1")).toBe("UPDATE");
+});
+
+test("names the table a statement works on, or the function it calls", () => {
+  const target = (text: string) => queryTarget(text, operationName(text));
+  expect(target('select "id", "code" from "accounts" where "accounts"."id" = $1')).toBe("accounts");
+  expect(target('insert into "accounts" ("id", "code") values (default, $1) returning "id"')).toBe("accounts");
+  expect(target('update "public"."invoices" set "status" = $1 where "id" = $2')).toBe("invoices");
+  expect(target("delete from outbox where id = $1")).toBe("outbox");
+  expect(target("select set_config('app.organization_id', $1, true)")).toBe("set_config");
+  expect(target("select 1")).toBeUndefined();
+  expect(target("begin")).toBeUndefined();
+  expect(target("commit")).toBeUndefined();
 });
 
 describe.skipIf(!url)("against PostgreSQL", () => {
@@ -137,7 +149,8 @@ describe.skipIf(!url)("against PostgreSQL", () => {
       .find(
         (span) => span.kind === SpanKind.CLIENT && String(span.attributes["db.query.text"]).startsWith("select note"),
       );
-    expect(query?.name).toBe(`SELECT ${database}`);
+    expect(query?.name).toBe("SELECT entries");
+    expect(query?.attributes["db.collection.name"]).toBe("entries");
     expect(query?.attributes["db.namespace"]).toBe(database);
     expect(query?.attributes["db.system.name"]).toBe("postgresql");
     expect(query?.attributes["db.operation.name"]).toBe("SELECT");

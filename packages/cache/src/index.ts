@@ -71,6 +71,7 @@ export function createCache(options: CacheOptions): Cache {
     "server.address": url.hostname,
     "server.port": Number(url.port || 6379),
   };
+  const target = `${base["server.address"]}:${base["server.port"]}`;
   const tracer = trace.getTracer("@deus/cache");
   const meter = metrics.getMeter("@deus/cache");
   const duration = meter.createHistogram("db.client.operation.duration", {
@@ -135,7 +136,7 @@ export function createCache(options: CacheOptions): Cache {
       }
     };
     if (!trace.getActiveSpan()) return measured();
-    return tracer.startActiveSpan(command, { kind: SpanKind.CLIENT, attributes }, measured);
+    return tracer.startActiveSpan(`${command} ${target}`, { kind: SpanKind.CLIENT, attributes }, measured);
   };
 
   const key = (name: string) => `${options.prefix}:${name}`;
