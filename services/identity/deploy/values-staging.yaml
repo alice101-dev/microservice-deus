@@ -1,5 +1,5 @@
 image:
-  tag: "f8ee412f"
+  tag: "ad2852eb"
 env:
   AUTH_BASE_URL: http://localhost:8080
   AUTH_TRUSTED_ORIGINS: http://localhost:8080,http://localhost:5173
