@@ -12,7 +12,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
     "test": "vitest run",
     "e2e": "bun e2e/journey.ts",
-    "e2e:telemetry": "bun e2e/telemetry.ts"
+    "e2e:telemetry": "bun e2e/telemetry.ts",
+    "e2e:update": "bun e2e/update.ts"
   },
   "dependencies": {
     "@deus/config": "workspace:*",
