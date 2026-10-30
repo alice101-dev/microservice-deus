@@ -26,6 +26,15 @@ export class UpstreamError extends AppError {
   }
 }
 
+const ID_SEGMENT = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+)$/i;
+
+export function urlTemplate(pathname: string): string {
+  return pathname
+    .split("/")
+    .map((segment) => (ID_SEGMENT.test(segment) ? ":id" : segment))
+    .join("/");
+}
+
 function buildUrl(baseUrl: string, path: string, query: RequestOptions["query"]) {
   const url = new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
   for (const [key, value] of Object.entries(query ?? {})) {
@@ -50,9 +59,10 @@ export function createClient(options: ClientOptions) {
       "server.port": Number(url.port || (url.protocol === "https:" ? 443 : 80)),
       "peer.service": options.name,
     };
+    const template = urlTemplate(url.pathname);
     return tracer.startActiveSpan(
-      `${method} ${options.name}`,
-      { kind: SpanKind.CLIENT, attributes: { ...attributes, "url.full": `${url.origin}${url.pathname}` } },
+      `${method} ${template}`,
+      { kind: SpanKind.CLIENT, attributes: { ...attributes, "url.full": url.href, "url.template": template } },
       async (span) => {
         const started = performance.now();
         const headers: Record<string, string> = { accept: "application/json", ...init.headers };

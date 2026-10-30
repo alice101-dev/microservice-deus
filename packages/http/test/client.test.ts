@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { AppError } from "@deus/errors";
 import { startTestTelemetry } from "@deus/telemetry/testing";
 import { SpanKind, trace } from "@opentelemetry/api";
-import { createClient, UpstreamError } from "../src";
+import { createClient, UpstreamError, urlTemplate } from "../src";
 
 const { telemetry, spans } = startTestTelemetry("client-test");
 const seen: Record<string, string | null>[] = [];
@@ -48,8 +48,19 @@ describe("createClient", () => {
     expect(seen[0]?.traceparent).toContain(traceId);
     expect(seen[0]).toMatchObject({ authorization: "Bearer t", idempotency: "k", ids: "a,b" });
     const client_span = spans.getFinishedSpans().find((span) => span.kind === SpanKind.CLIENT);
-    expect(client_span?.name).toBe("GET accounts");
+    expect(client_span?.name).toBe("GET /ok");
+    expect(client_span?.attributes["url.template"]).toBe("/ok");
+    expect(client_span?.attributes["url.full"]).toBe(`http://localhost:${server.port}/ok?id=a&id=b`);
+    expect(client_span?.attributes["peer.service"]).toBe("accounts");
     expect(client_span?.attributes["http.response.status_code"]).toBe(200);
+    expect(JSON.stringify(client_span?.attributes)).not.toContain("Bearer");
+  });
+
+  test("names requests after the path, with identifiers replaced so the names stay a short list", () => {
+    expect(urlTemplate("/internal/ledger/balances")).toBe("/internal/ledger/balances");
+    expect(urlTemplate("/internal/sales/invoices/0b7c43c4-2c64-4a36-9d0f-2f4d1d3f8a10/allocations")).toBe(
+      "/internal/sales/invoices/:id/allocations",
+    );
   });
 
   test("passes client errors of the upstream through", async () => {
