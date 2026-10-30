@@ -9,7 +9,6 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs";
 import { BatchSpanProcessor, type ReadableSpan, StackContextManager, TracerProvider } from "@opentelemetry/sdk-trace";
 import { type Metric, onCLS, onFCP, onINP, onLCP, onTTFB } from "web-vitals";
-import { currentRoute, instrumentInteractions, urlTemplate } from "./interactions";
 
 export type LogLevel = "info" | "warn" | "error";
 
@@ -20,25 +19,16 @@ const SEVERITY: Record<LogLevel, SeverityNumber> = {
 };
 
 const UNTRACED = /\/(otlp|_app)\//;
-const SESSION_KEY = "deus.session_id";
+const ID_SEGMENT = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+)$/i;
 
 let started = false;
 let providers: Array<{ forceFlush(): Promise<void> }> = [];
 
-function randomId() {
-  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-export function sessionId() {
-  try {
-    const existing = sessionStorage.getItem(SESSION_KEY);
-    if (existing) return existing;
-    const created = randomId();
-    sessionStorage.setItem(SESSION_KEY, created);
-    return created;
-  } catch {
-    return randomId();
-  }
+export function urlTemplate(url: string): string {
+  return new URL(url, location.href).pathname
+    .split("/")
+    .map((segment) => (ID_SEGMENT.test(segment) ? ":id" : segment))
+    .join("/");
 }
 
 function nameRequest(span: Span) {
@@ -68,7 +58,6 @@ export function startTelemetry(options: { version: string; environment: string; 
     "service.version": options.version,
     "service.namespace": "deus",
     "deployment.environment.name": options.environment,
-    "session.id": sessionId(),
   });
   const tracerProvider = new TracerProvider({
     resource,
@@ -88,7 +77,6 @@ export function startTelemetry(options: { version: string; environment: string; 
       new DocumentLoadInstrumentation(),
     ],
   });
-  instrumentInteractions(UNTRACED);
   for (const subscribe of [onLCP, onINP, onCLS, onFCP, onTTFB]) subscribe(reportVital);
   providers = [tracerProvider, loggerProvider];
   document.addEventListener("visibilitychange", () => {
@@ -117,7 +105,7 @@ export function log(level: LogLevel, message: string, attributes: Attributes = {
     body: message,
     attributes: {
       "url.path": typeof location === "undefined" ? undefined : location.pathname,
-      "app.route": currentRoute() ?? undefined,
+      "app.route": typeof location === "undefined" ? undefined : urlTemplate(location.pathname),
       ...attributes,
       ...errorAttributes(error),
     },

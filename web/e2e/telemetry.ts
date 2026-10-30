@@ -104,57 +104,40 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(2000);
 
-const byName = (prefix: string) => exported.find((entry) => entry.span.name.startsWith(prefix));
-const pageload = byName("pageload");
-const click = byName("click Penjualan");
-const navigation = byName("navigation /sales");
-const children = (parent?: { span: OtlpSpan }) =>
-  exported.filter((entry) => parent && entry.span.parentSpanId === parent.span.spanId);
+const fetches = exported.filter((entry) => /^(GET|POST|PUT|PATCH|DELETE) \//.test(entry.span.name));
 const urlOf = (entry: { span: OtlpSpan }) => {
   const attributes = flat(entry.span.attributes);
   return attributes["url.full"] ?? attributes["http.url"] ?? "";
 };
 
 expect(
-  pageload !== undefined && flat(pageload.span.attributes)["app.route"] === "/contacts",
-  "pageload span named after the route /contacts",
+  fetches.some((entry) => entry.span.name === "GET /api/contacts"),
+  "the contacts request of the first page is traced as GET /api/contacts",
 );
 expect(
-  children(pageload).some((entry) => urlOf(entry).includes("/api/contacts")),
-  "the contacts request of the first page is a child of pageload",
+  fetches.some((entry) => entry.span.name === "GET /api/sales/invoices"),
+  "the sales list request after clicking Penjualan is traced as GET /api/sales/invoices",
 );
 expect(
-  click !== undefined && flat(click.span.attributes)["ui.element.href"] === "/sales",
-  "click on the Penjualan menu link is recorded",
+  fetches.length > 0 && fetches.every((entry) => !entry.span.parentSpanId),
+  "every request from the browser starts its own trace",
 );
 expect(
-  navigation !== undefined && flat(navigation.span.attributes)["app.route.from"] === "/contacts",
-  "navigation from /contacts to /sales",
-);
-expect(
-  children(navigation).some((entry) => urlOf(entry).includes("/api/sales")),
-  "the sales list request is a child of the navigation",
-);
-expect(
-  navigation !== undefined && navigation.span.parentSpanId === click?.span.spanId,
-  "the navigation is part of the click's trace",
-);
-expect(
-  children(navigation).some((entry) => entry.span.name === "GET /api/sales/invoices"),
-  "requests are named after their method and path",
+  !exported.some((entry) => /^(click|navigation|pageload)\b/.test(entry.span.name)),
+  "there are no click, navigation or page load spans",
 );
 expect(
   !exported.some((entry) => entry.span.name !== "resourceFetch" && urlOf(entry).includes("/_app/")),
   "requests for the app's own files, such as the version check, are not traced",
 );
-expect(flat(navigation?.span.attributes)["user.id"] === USER, "actions carry user.id");
-const sessions = new Set(exported.map((entry) => entry.resource["session.id"]));
-expect(sessions.size === 1 && !sessions.has(undefined as unknown as string), "every span carries the same session.id");
 expect(!JSON.stringify(exported).includes(EMAIL), "the user's email never leaves the browser in spans");
-expect(byName("documentLoad") !== undefined, "document load timing is traced");
 expect(
-  logged.some((record) => record.body === "web vital"),
-  "Web Vitals are logged",
+  exported.some((entry) => entry.span.name === "documentLoad"),
+  "document load timing is traced",
+);
+expect(
+  logged.some((record) => record.body === "web vital" && record["app.route"] === "/sales"),
+  "Web Vitals are logged with the page",
 );
 
 process.stdout.write(
