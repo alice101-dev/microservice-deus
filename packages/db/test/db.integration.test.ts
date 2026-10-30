@@ -20,7 +20,7 @@ test("names the operation of a statement", () => {
 });
 
 test("names the table a statement works on, or the function it calls", () => {
-  const target = (text: string) => queryTarget(text, operationName(text));
+  const target = (text: string) => queryTarget(text, operationName(text))?.name;
   expect(target('select "id", "code" from "accounts" where "accounts"."id" = $1')).toBe("accounts");
   expect(target('insert into "accounts" ("id", "code") values (default, $1) returning "id"')).toBe("accounts");
   expect(target('update "public"."invoices" set "status" = $1 where "id" = $2')).toBe("invoices");
@@ -29,6 +29,8 @@ test("names the table a statement works on, or the function it calls", () => {
   expect(target("select 1")).toBeUndefined();
   expect(target("begin")).toBeUndefined();
   expect(target("commit")).toBeUndefined();
+  expect(queryTarget('select "id" from "accounts"', "SELECT")?.table).toBe(true);
+  expect(queryTarget("select set_config('app.organization_id', $1, true)", "SELECT")?.table).toBe(false);
 });
 
 describe.skipIf(!url)("against PostgreSQL", () => {

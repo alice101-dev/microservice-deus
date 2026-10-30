@@ -24,17 +24,18 @@ export function operationName(text: string): string {
 }
 
 const IDENTIFIER = String.raw`((?:"[^"]+"|[a-z_][\w$]*)(?:\s*\.\s*(?:"[^"]+"|[a-z_][\w$]*))?)`;
+const FUNCTION_CALL = /^\s*select\s+([a-z_][\w$]*)\s*\(/i;
 const TARGETS: Record<string, RegExp[]> = {
-  SELECT: [new RegExp(String.raw`\bfrom\s+${IDENTIFIER}`, "i"), /^\s*select\s+([a-z_][\w$]*)\s*\(/i],
+  SELECT: [new RegExp(String.raw`\bfrom\s+${IDENTIFIER}`, "i"), FUNCTION_CALL],
   DELETE: [new RegExp(String.raw`\bfrom\s+${IDENTIFIER}`, "i")],
   INSERT: [new RegExp(String.raw`\binto\s+${IDENTIFIER}`, "i")],
   UPDATE: [new RegExp(String.raw`\bupdate\s+${IDENTIFIER}`, "i")],
 };
 
-export function queryTarget(text: string, operation: string): string | undefined {
+export function queryTarget(text: string, operation: string): { name: string; table: boolean } | undefined {
   for (const pattern of TARGETS[operation] ?? []) {
-    const match = text.match(pattern)?.[1];
-    if (match) return match.split(".").pop()?.trim().replaceAll('"', "");
+    const name = text.match(pattern)?.[1]?.split(".").pop()?.trim().replaceAll('"', "");
+    if (name) return { name, table: pattern !== FUNCTION_CALL };
   }
   return undefined;
 }
@@ -88,10 +89,14 @@ function instrumentQueries(target: pg.Pool | pg.PoolClient, base: Attributes, { 
     };
     if (!trace.getActiveSpan()) return measured();
     return tracer.startActiveSpan(
-      target ? `${operation} ${target}` : operation,
+      target ? `${operation} ${target.name}` : operation,
       {
         kind: SpanKind.CLIENT,
-        attributes: { ...attributes, "db.query.text": text, ...(target ? { "db.collection.name": target } : {}) },
+        attributes: {
+          ...attributes,
+          "db.query.text": text,
+          ...(target?.table ? { "db.collection.name": target.name } : {}),
+        },
       },
       measured,
     );
