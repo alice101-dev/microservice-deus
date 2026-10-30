@@ -135,6 +135,18 @@ expect(
   children(navigation).some((entry) => urlOf(entry).includes("/api/sales")),
   "the sales list request is a child of the navigation",
 );
+expect(
+  navigation !== undefined && navigation.span.parentSpanId === click?.span.spanId,
+  "the navigation is part of the click's trace",
+);
+expect(
+  children(navigation).some((entry) => entry.span.name === "GET /api/sales/invoices"),
+  "requests are named after their method and path",
+);
+expect(
+  !exported.some((entry) => entry.span.name !== "resourceFetch" && urlOf(entry).includes("/_app/")),
+  "requests for the app's own files, such as the version check, are not traced",
+);
 expect(flat(navigation?.span.attributes)["user.id"] === USER, "actions carry user.id");
 const sessions = new Set(exported.map((entry) => entry.resource["session.id"]));
 expect(sessions.size === 1 && !sessions.has(undefined as unknown as string), "every span carries the same session.id");

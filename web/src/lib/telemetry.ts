@@ -1,4 +1,4 @@
-import { type Attributes, context, logs, propagation, SeverityNumber, trace } from "@opentelemetry/api";
+import { type Attributes, context, logs, propagation, SeverityNumber, type Span, trace } from "@opentelemetry/api";
 import { CompositePropagator, W3CTraceContextPropagator } from "@opentelemetry/core";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -7,9 +7,9 @@ import { DocumentLoadInstrumentation } from "@opentelemetry/instrumentation-docu
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchLogRecordProcessor, LoggerProvider } from "@opentelemetry/sdk-logs";
-import { BatchSpanProcessor, StackContextManager, TracerProvider } from "@opentelemetry/sdk-trace";
+import { BatchSpanProcessor, type ReadableSpan, StackContextManager, TracerProvider } from "@opentelemetry/sdk-trace";
 import { type Metric, onCLS, onFCP, onINP, onLCP, onTTFB } from "web-vitals";
-import { currentRoute, instrumentInteractions } from "./interactions";
+import { currentRoute, instrumentInteractions, urlTemplate } from "./interactions";
 
 export type LogLevel = "info" | "warn" | "error";
 
@@ -19,7 +19,7 @@ const SEVERITY: Record<LogLevel, SeverityNumber> = {
   error: SeverityNumber.ERROR,
 };
 
-const OTLP = /\/otlp\//;
+const UNTRACED = /\/(otlp|_app)\//;
 const SESSION_KEY = "deus.session_id";
 
 let started = false;
@@ -39,6 +39,15 @@ export function sessionId() {
   } catch {
     return randomId();
   }
+}
+
+function nameRequest(span: Span) {
+  const { attributes } = span as unknown as ReadableSpan;
+  const url = attributes["url.full"];
+  if (typeof url !== "string") return;
+  const template = urlTemplate(url);
+  span.setAttribute("url.template", template);
+  span.updateName(`${attributes["http.request.method"] ?? "GET"} ${template}`);
 }
 
 function reportVital(metric: Metric) {
@@ -75,11 +84,11 @@ export function startTelemetry(options: { version: string; environment: string; 
   logs.setGlobalLoggerProvider(loggerProvider);
   registerInstrumentations({
     instrumentations: [
-      new FetchInstrumentation({ ignoreUrls: [OTLP], clearTimingResources: true }),
+      new FetchInstrumentation({ ignoreUrls: [UNTRACED], clearTimingResources: true, requestHook: nameRequest }),
       new DocumentLoadInstrumentation(),
     ],
   });
-  instrumentInteractions(OTLP);
+  instrumentInteractions(UNTRACED);
   for (const subscribe of [onLCP, onINP, onCLS, onFCP, onTTFB]) subscribe(reportVital);
   providers = [tracerProvider, loggerProvider];
   document.addEventListener("visibilitychange", () => {

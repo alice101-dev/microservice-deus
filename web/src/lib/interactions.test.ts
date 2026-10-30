@@ -94,13 +94,41 @@ describe("interactions", () => {
     expect(parents).toEqual([action.spanContext().spanId, undefined, action.spanContext().spanId]);
   });
 
-  test("a navigation ends the previous action and names itself after the route", async () => {
+  test("a navigation caused by a click is part of the click's trace, and its requests are its children", async () => {
     interactions.instrumentInteractions(/\/otlp\//);
-    interactions.startInteraction("click Penjualan", { "ui.action": "click" });
-    interactions.startNavigation("link", "/(app)", "/(app)/sales");
     await settle(1100);
-    const names = exporter.getFinishedSpans().map((span) => span.name);
-    expect(names).toContain("click Penjualan");
-    expect(names).toContain("navigation /sales");
+    exporter.reset();
+    const click = interactions.startInteraction("click Penjualan", { "ui.action": "click" });
+    interactions.startNavigation("link", "/(app)", "/(app)/sales");
+    await window.fetch("/api/sales/invoices");
+    await settle(1100);
+    const spans = exporter.getFinishedSpans();
+    const navigation = spans.find((span) => span.name === "navigation /sales");
+    expect(spans.map((span) => span.name)).toEqual(["navigation /sales", "click Penjualan"]);
+    expect(navigation?.spanContext().traceId).toBe(click.spanContext().traceId);
+    expect(navigation?.parentSpanContext?.spanId).toBe(click.spanContext().spanId);
+    expect(parents).toEqual([navigation?.spanContext().spanId]);
   });
+
+  test("a back navigation, or one without a click, starts its own trace", async () => {
+    interactions.instrumentInteractions(/\/otlp\//);
+    await settle(1100);
+    exporter.reset();
+    interactions.startInteraction("click Penjualan", { "ui.action": "click" });
+    interactions.startNavigation("popstate", "/(app)/sales", "/(app)");
+    interactions.startNavigation("goto", "/(app)", "/(app)/contacts");
+    await settle(1100);
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map((span) => span.name)).toEqual(["click Penjualan", "navigation /", "navigation /contacts"]);
+    expect(spans.every((span) => span.parentSpanContext === undefined)).toBe(true);
+    expect(new Set(spans.map((span) => span.spanContext().traceId)).size).toBe(3);
+  });
+});
+
+test("request names use the path with identifiers replaced, so they stay a short list", () => {
+  expect(interactions.urlTemplate("/api/sales/invoices/0b7c43c4-2c64-4a36-9d0f-2f4d1d3f8a10/issue")).toBe(
+    "/api/sales/invoices/:id/issue",
+  );
+  expect(interactions.urlTemplate("http://localhost/api/ledger/journals?page=2")).toBe("/api/ledger/journals");
+  expect(interactions.urlTemplate("/api/reporting/periods/2026/10")).toBe("/api/reporting/periods/:id/:id");
 });

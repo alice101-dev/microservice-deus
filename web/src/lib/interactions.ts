@@ -3,6 +3,8 @@ import { type Attributes, type Context, context, ROOT_CONTEXT, type Span, SpanKi
 const IDLE_MS = 1000;
 const MAX_MS = 15_000;
 const NAME_LENGTH = 80;
+const NESTED_NAVIGATIONS = new Set(["link", "goto", "form"]);
+const ID_SEGMENT = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+)$/i;
 const INTERACTIVE = [
   "a[href]",
   "button",
@@ -19,6 +21,8 @@ const INTERACTIVE = [
 
 interface Interaction {
   span: Span;
+  action: unknown;
+  children: Span[];
   context: Context;
   inflight: number;
   idle?: ReturnType<typeof setTimeout>;
@@ -50,6 +54,7 @@ function finish(interaction: Interaction | undefined = current) {
   if (!interaction) return;
   clearTimeout(interaction.idle);
   clearTimeout(interaction.max);
+  for (const child of interaction.children.reverse()) child.end();
   interaction.span.end();
   if (current === interaction) current = undefined;
 }
@@ -59,18 +64,24 @@ function scheduleIdle(interaction: Interaction) {
   if (interaction.inflight === 0) interaction.idle = setTimeout(() => finish(interaction), IDLE_MS);
 }
 
-export function startInteraction(name: string, attributes: Attributes = {}): Span {
-  finish();
-  const span = trace.getTracer("@deus/web").startSpan(
+function startSpan(name: string, attributes: Attributes, parent: Context) {
+  return trace.getTracer("@deus/web").startSpan(
     name,
     {
       kind: SpanKind.INTERNAL,
       attributes: { ...(route ? { "app.route": route } : {}), ...(userId ? { "user.id": userId } : {}), ...attributes },
     },
-    ROOT_CONTEXT,
+    parent,
   );
+}
+
+export function startInteraction(name: string, attributes: Attributes = {}): Span {
+  finish();
+  const span = startSpan(name, attributes, ROOT_CONTEXT);
   const interaction: Interaction = {
     span,
+    action: attributes["ui.action"],
+    children: [],
     context: trace.setSpan(ROOT_CONTEXT, span),
     inflight: 0,
     max: setTimeout(() => finish(interaction), MAX_MS),
@@ -108,12 +119,27 @@ export function recordClick(event: Event) {
 export function startNavigation(type: string, fromId: string | null, toId: string | null) {
   const from = routeName(fromId);
   const to = routeName(toId);
-  startInteraction(`navigation ${to ?? "unknown"}`, {
+  const name = `navigation ${to ?? "unknown"}`;
+  const attributes = {
     "ui.action": "navigation",
     "navigation.type": type,
     "app.route": to ?? "unknown",
     ...(from ? { "app.route.from": from } : {}),
-  });
+  };
+  if (current?.action === "click" && NESTED_NAVIGATIONS.has(type)) {
+    const span = startSpan(name, attributes, trace.setSpan(ROOT_CONTEXT, current.span));
+    current.children.push(span);
+    current.context = trace.setSpan(ROOT_CONTEXT, span);
+    return;
+  }
+  startInteraction(name, attributes);
+}
+
+export function urlTemplate(url: string): string {
+  return new URL(url, location.href).pathname
+    .split("/")
+    .map((segment) => (ID_SEGMENT.test(segment) ? ":id" : segment))
+    .join("/");
 }
 
 export function nameEntry(toId: string | null) {
