@@ -34,10 +34,72 @@ test("an unreachable Redis is a miss, warned about once", async () => {
   expect(await cache.getAndDelete("d")).toBeNull();
   expect(performance.now() - started).toBeLessThan(3000);
   expect(warnings).toEqual(["cache unavailable, falling back to the source"]);
+  await expect(cache.check()).rejects.toThrow("Redis is not connected");
   cache.close();
 });
 
 describe.skipIf(!url)("against Redis", () => {
+  test("is not ready while Redis is unreachable and reconnects after the client gave up", async () => {
+    const target = new URL(url as string);
+    const port = 40000 + (process.pid % 20000);
+    const refusing = Bun.listen({
+      hostname: "127.0.0.1",
+      port,
+      socket: { open: (socket) => void socket.end(), data() {} },
+    });
+    const logs: string[] = [];
+    const cache = createCache({
+      url: `redis://${target.username}:${target.password}@127.0.0.1:${port}/0`,
+      prefix: `test-${process.pid}`,
+      timeoutMs: 100,
+      maxRetries: 1,
+      logger: { info: (message) => logs.push(message), warn: (message) => logs.push(message) },
+    });
+    await cache.ready();
+    expect(await cache.get("late")).toBeNull();
+    await expect(cache.check()).rejects.toThrow("Redis is not connected");
+    refusing.stop(true);
+
+    const upstreams = new Map<object, Awaited<ReturnType<typeof Bun.connect>>>();
+    const proxy = Bun.listen<{ pending: Uint8Array[] }>({
+      hostname: "127.0.0.1",
+      port,
+      socket: {
+        async open(socket) {
+          socket.data = { pending: [] };
+          const upstream = await Bun.connect({
+            hostname: target.hostname,
+            port: Number(target.port),
+            socket: { data: (_, chunk) => void socket.write(chunk), close: () => void socket.end() },
+          });
+          upstreams.set(socket, upstream);
+          for (const chunk of socket.data.pending) upstream.write(chunk);
+        },
+        data(socket, chunk) {
+          const upstream = upstreams.get(socket);
+          if (upstream) upstream.write(chunk);
+          else socket.data.pending.push(new Uint8Array(chunk));
+        },
+        close: (socket) => void upstreams.get(socket)?.end(),
+      },
+    });
+    try {
+      let value: string | null = null;
+      for (let attempt = 0; attempt < 15 && value === null; attempt++) {
+        await Bun.sleep(200);
+        await cache.check().catch(() => {});
+        await cache.set("late", "back", 60);
+        value = await cache.get("late");
+      }
+      expect(value).toBe("back");
+      await cache.check();
+      expect(logs).toEqual(["cache unavailable, falling back to the source", "cache available again"]);
+    } finally {
+      cache.close();
+      proxy.stop(true);
+    }
+  });
+
   const cache = createCache({ url, prefix: `test-${process.pid}`, logger: quiet });
   beforeAll(() => cache.ready());
   afterAll(() => cache.close());

@@ -11,11 +11,13 @@ export interface CacheOptions {
   prefix: string;
   logger: CacheLogger;
   timeoutMs?: number;
+  maxRetries?: number;
 }
 
 export interface Cache {
   readonly enabled: boolean;
   ready(): Promise<void>;
+  check(): Promise<void>;
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ttlSeconds?: number): Promise<void>;
   del(key: string): Promise<void>;
@@ -26,6 +28,8 @@ export interface Cache {
 }
 
 type Command = "GET" | "SET" | "DEL" | "GETDEL" | "EVAL";
+
+const RECONNECT_INTERVAL_MS = 1000;
 
 const INCREMENT_WITH_TTL =
   "local value = redis.call('INCR', KEYS[1]) if value == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end return value";
@@ -40,6 +44,7 @@ class CacheTimeoutError extends Error {
 const disabled: Cache = {
   enabled: false,
   ready: async () => {},
+  check: async () => {},
   get: async () => null,
   set: async () => {},
   del: async () => {},
@@ -56,6 +61,7 @@ export function createCache(options: CacheOptions): Cache {
     connectionTimeout: 2000,
     autoReconnect: true,
     enableOfflineQueue: false,
+    ...(options.maxRetries === undefined ? {} : { maxRetries: options.maxRetries }),
   });
   const connected = client.connect().catch(() => {});
   const timeoutMs = options.timeoutMs ?? 250;
@@ -77,8 +83,24 @@ export function createCache(options: CacheOptions): Cache {
     description: "Cache reads by result: hit, miss or error",
   });
   let unavailableSince: number | undefined;
+  let closed = false;
+  let reconnecting = false;
+  let lastReconnect = 0;
+
+  const reconnect = () => {
+    if (closed || reconnecting || client.connected || Date.now() - lastReconnect < RECONNECT_INTERVAL_MS) return;
+    reconnecting = true;
+    lastReconnect = Date.now();
+    client
+      .connect()
+      .catch(() => {})
+      .finally(() => {
+        reconnecting = false;
+      });
+  };
 
   const failed = (command: Command, error: unknown) => {
+    reconnect();
     if (unavailableSince !== undefined) return;
     unavailableSince = Date.now();
     options.logger.warn("cache unavailable, falling back to the source", { "db.operation.name": command }, error);
@@ -121,6 +143,11 @@ export function createCache(options: CacheOptions): Cache {
   const cache: Cache = {
     enabled: true,
     ready: () => connected,
+    async check() {
+      if (client.connected) return;
+      reconnect();
+      throw new Error("Redis is not connected");
+    },
     async get(name) {
       try {
         const value = await run(
@@ -190,7 +217,10 @@ export function createCache(options: CacheOptions): Cache {
       await cache.set(name, JSON.stringify(value), ttlSeconds);
       return value;
     },
-    close: () => client.close(),
+    close: () => {
+      closed = true;
+      client.close();
+    },
   };
   return cache;
 }

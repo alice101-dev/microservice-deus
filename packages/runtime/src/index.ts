@@ -97,7 +97,7 @@ export function startService<P extends TProperties, S extends Record<string, unk
     verify,
     verifyService: createServiceVerifier({ ...kubernetes, namespace: config.POD_NAMESPACE }),
     serviceToken: serviceTokenSource(join(identity, "service/token")),
-    readiness: [readiness(pool)],
+    readiness: [readiness(pool), cache.check],
     onShutdown: (hook) => {
       shutdownHooks.push(hook);
     },
