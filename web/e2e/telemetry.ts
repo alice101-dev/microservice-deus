@@ -105,6 +105,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(2000);
 
 const fetches = exported.filter((entry) => /^(GET|POST|PUT|PATCH|DELETE) \//.test(entry.span.name));
+const byName = (name: string) => exported.find((entry) => entry.span.name === name);
 const urlOf = (entry: { span: OtlpSpan }) => {
   const attributes = flat(entry.span.attributes);
   return attributes["url.full"] ?? attributes["http.url"] ?? "";
@@ -129,6 +130,14 @@ expect(
 expect(
   !exported.some((entry) => entry.span.name !== "resourceFetch" && urlOf(entry).includes("/_app/")),
   "requests for the app's own files, such as the version check, are not traced",
+);
+expect(
+  flat(byName("GET /api/contacts")?.span.attributes)["app.route"] === "/contacts",
+  "requests of the first page carry app.route /contacts",
+);
+expect(
+  flat(byName("GET /api/sales/invoices")?.span.attributes)["app.route"] === "/sales",
+  "requests that load the next page carry that page (/sales), not the page the user left",
 );
 expect(!JSON.stringify(exported).includes(EMAIL), "the user's email never leaves the browser in spans");
 expect(

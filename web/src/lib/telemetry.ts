@@ -24,6 +24,16 @@ const ID_SEGMENT = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 let started = false;
 let providers: Array<{ forceFlush(): Promise<void> }> = [];
 
+let page: string | undefined;
+
+export function setPage(url: URL | string) {
+  page = urlTemplate(String(url));
+}
+
+export function currentPage() {
+  return page ?? (typeof location === "undefined" ? undefined : urlTemplate(location.pathname));
+}
+
 export function urlTemplate(url: string): string {
   return new URL(url, location.href).pathname
     .split("/")
@@ -37,6 +47,8 @@ function nameRequest(span: Span) {
   if (typeof url !== "string") return;
   const template = urlTemplate(url);
   span.setAttribute("url.template", template);
+  const route = currentPage();
+  if (route) span.setAttribute("app.route", route);
   span.updateName(`${attributes["http.request.method"] ?? "GET"} ${template}`);
 }
 
@@ -105,7 +117,7 @@ export function log(level: LogLevel, message: string, attributes: Attributes = {
     body: message,
     attributes: {
       "url.path": typeof location === "undefined" ? undefined : location.pathname,
-      "app.route": typeof location === "undefined" ? undefined : urlTemplate(location.pathname),
+      "app.route": currentPage(),
       ...attributes,
       ...errorAttributes(error),
     },
