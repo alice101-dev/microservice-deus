@@ -1,0 +1,11 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "traffic.name" . }}
+  labels:
+    {{- include "traffic.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "traffic.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]

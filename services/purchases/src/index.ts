@@ -1,0 +1,44 @@
+import { accountsByCode, accountsLookup, contactsLookup, ledgerClient, productsLookup } from "@deus/clients";
+import { createClient } from "@deus/http";
+import { createRelay } from "@deus/outbox";
+import { startService } from "@deus/runtime";
+import { Type } from "@sinclair/typebox";
+import { createApp } from "./app";
+import { purchaseHandlers } from "./handlers";
+import { schema } from "./schema";
+
+startService({
+  config: {
+    ACCOUNTS_URL: Type.String({ default: "http://accounts" }),
+    CONTACTS_URL: Type.String({ default: "http://contacts" }),
+    PRODUCTS_URL: Type.String({ default: "http://products" }),
+    LEDGER_URL: Type.String({ default: "http://ledger" }),
+    UPSTREAM_TIMEOUT_MS: Type.Integer({ default: 3000 }),
+    PAYABLE_ACCOUNT_CODE: Type.String({ default: "2-1000" }),
+    VAT_INPUT_ACCOUNT_CODE: Type.String({ default: "1-1400" }),
+  },
+  schema,
+  build: (context) => {
+    const { config, serviceToken } = context;
+    const client = (name: string, baseUrl: string) =>
+      createClient({ name, baseUrl, timeoutMs: config.UPSTREAM_TIMEOUT_MS });
+    const accounts = client("accounts", config.ACCOUNTS_URL);
+    const ledger = ledgerClient(client("ledger", config.LEDGER_URL), serviceToken);
+    const relay = createRelay({
+      db: context.db,
+      logger: context.logger,
+      handlers: purchaseHandlers(ledger),
+    });
+    relay.start();
+    context.onShutdown(() => relay.stop());
+    return createApp({
+      ...context,
+      accounts: accountsLookup(accounts, serviceToken),
+      accountsByCode: accountsByCode(accounts, serviceToken),
+      contacts: contactsLookup(client("contacts", config.CONTACTS_URL), serviceToken),
+      products: productsLookup(client("products", config.PRODUCTS_URL), serviceToken),
+      payableAccountCode: config.PAYABLE_ACCOUNT_CODE,
+      vatInputAccountCode: config.VAT_INPUT_ACCOUNT_CODE,
+    });
+  },
+});

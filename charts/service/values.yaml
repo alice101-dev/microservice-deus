@@ -1,0 +1,66 @@
+image:
+  registry: ""
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+environment: staging
+name: ""
+partOf: deus
+port: 3000
+logLevel: info
+replicas: 1
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+resources:
+  requests:
+    cpu: 30m
+    memory: 96Mi
+  limits:
+    memory: 256Mi
+env: {}
+envFrom: []
+generatedSecrets: []
+database:
+  enabled: false
+  name: ""
+  cluster: deus-db
+  port: 5432
+  maxConnections: 5
+cache:
+  enabled: false
+  secret: redis
+migrations:
+  activeDeadlineSeconds: 600
+  resources:
+    requests:
+      cpu: 20m
+      memory: 96Mi
+    limits:
+      memory: 256Mi
+telemetry:
+  endpoint: http://otel-collector.monitoring.svc.cluster.local.:4318
+  metricExportIntervalMs: 30000
+  profilingEndpoint: http://pyroscope.monitoring.svc.cluster.local.:4040
+shutdown:
+  drainMs: 5000
+  flushMs: 5000
+  terminationGracePeriodSeconds: 30
+route:
+  enabled: false
+  pathPrefix: ""
+  gateway:
+    name: kgateway-public
+    namespace: kgateway-system
+    sectionName: http
+serviceIdentity:
+  audience: deus-services
+  expirationSeconds: 3600
+networkPolicy:
+  enabled: true
+  gatewayNamespace: kgateway-system
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1

@@ -1,0 +1,7 @@
+image:
+  repository: organization
+route:
+  enabled: true
+  pathPrefix: /api/organization
+database:
+  enabled: true

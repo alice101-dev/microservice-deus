@@ -1,0 +1,22 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: secrets
+      run: gitleaks git --pre-commit --staged --redact --no-banner
+    - name: biome
+      glob: "*.{ts,tsx,js,json,jsonc,svelte}"
+      run: bunx biome check --no-errors-on-unmatched {staged_files}
+    - name: migrations
+      glob: "services/*/migrations/*.sql"
+      run: bunx squawk {staged_files}
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: typecheck
+      run: bun run typecheck
+    - name: test
+      run: bun test
+    - name: web
+      root: web/
+      run: bun run check && bun run test

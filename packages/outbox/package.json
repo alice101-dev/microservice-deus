@@ -1,0 +1,20 @@
+{
+  "name": "@deus/outbox",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@deus/db": "workspace:*",
+    "@deus/errors": "workspace:*",
+    "@deus/logger": "workspace:*",
+    "@opentelemetry/api": "1.10.0",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@deus/telemetry": "workspace:*",
+    "drizzle-kit": "0.31.11"
+  }
+}

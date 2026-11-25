@@ -1,0 +1,5 @@
+ratePerMinute:
+  browse: 120
+  sell: 2
+  buy: 1
+  mistakes: 3

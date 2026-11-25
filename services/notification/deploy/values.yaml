@@ -1,0 +1,7 @@
+image:
+  repository: notification
+route:
+  enabled: true
+  pathPrefix: /api/notification
+database:
+  enabled: true

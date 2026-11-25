@@ -1,0 +1,7 @@
+image:
+  repository: ledger
+route:
+  enabled: true
+  pathPrefix: /api/ledger
+database:
+  enabled: true

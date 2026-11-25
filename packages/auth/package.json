@@ -1,0 +1,20 @@
+{
+  "name": "@deus/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@deus/errors": "workspace:*",
+    "elysia": "1.4.30",
+    "jose": "6.2.13"
+  },
+  "devDependencies": {
+    "@deus/config": "workspace:*",
+    "@deus/http": "workspace:*",
+    "@deus/logger": "workspace:*",
+    "@deus/telemetry": "workspace:*"
+  }
+}

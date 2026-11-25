@@ -1,0 +1,232 @@
+import type { Client } from "@deus/http";
+
+const CHUNK = 200;
+
+export type ServiceToken = () => Promise<string>;
+
+export interface AccountRef {
+  id: string;
+  code: string;
+  name: string;
+  type: "asset" | "liability" | "equity" | "revenue" | "expense";
+  parentId: string | null;
+  active: boolean;
+  postable: boolean;
+}
+
+export interface ContactRef {
+  id: string;
+  name: string;
+  isCustomer: boolean;
+  isVendor: boolean;
+  email: string | null;
+  taxId: string | null;
+  address: string | null;
+  paymentTermsDays: number;
+  active: boolean;
+}
+
+export type Lookup<T> = (ids: string[], organizationId: string) => Promise<T[]>;
+
+function lookup<T>(client: Client, path: string, serviceToken: ServiceToken): Lookup<T> {
+  return async (ids, organizationId) => {
+    const unique = [...new Set(ids)];
+    const found: T[] = [];
+    for (let start = 0; start < unique.length; start += CHUNK) {
+      const id = unique.slice(start, start + CHUNK);
+      found.push(...(await client.get<T[]>(path, { query: { organizationId, id }, token: await serviceToken() })));
+    }
+    return found;
+  };
+}
+
+export const accountsLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<AccountRef>(client, "/internal/accounts/lookup", serviceToken);
+
+export const contactsLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<ContactRef>(client, "/internal/contacts/lookup", serviceToken);
+
+export interface ProductRef {
+  id: string;
+  sku: string;
+  name: string;
+  kind: "goods" | "service";
+  unit: string;
+  salePrice: string | null;
+  purchasePrice: string | null;
+  vatRate: string;
+  revenueAccountId: string | null;
+  expenseAccountId: string | null;
+  active: boolean;
+}
+
+export const productsLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<ProductRef>(client, "/internal/products/lookup", serviceToken);
+
+export type AccountsByCode = (codes: string[], organizationId: string) => Promise<AccountRef[]>;
+
+export const accountsByCode =
+  (client: Client, serviceToken: ServiceToken): AccountsByCode =>
+  async (codes, organizationId) =>
+    client.get<AccountRef[]>("/internal/accounts/by-code", {
+      query: { organizationId, code: [...new Set(codes)] },
+      token: await serviceToken(),
+    });
+
+export interface JournalLineInput {
+  accountId: string;
+  debit?: string;
+  credit?: string;
+  memo?: string;
+}
+
+export interface JournalRequest {
+  organizationId: string;
+  createdBy: string;
+  date: string;
+  description: string;
+  sourceId: string;
+  lines: JournalLineInput[];
+}
+
+export interface ReversalRequest {
+  organizationId: string;
+  createdBy: string;
+  sourceId: string;
+  date?: string;
+  description?: string;
+}
+
+export interface Ledger {
+  post(journal: JournalRequest, idempotencyKey: string): Promise<{ id: string }>;
+  reverse(reversal: ReversalRequest): Promise<{ id: string }>;
+}
+
+export const ledgerClient = (client: Client, serviceToken: ServiceToken): Ledger => ({
+  post: async (journal, idempotencyKey) =>
+    client.post("/internal/ledger/journals", { body: journal, idempotencyKey, token: await serviceToken() }),
+  reverse: async (reversal) =>
+    client.post("/internal/ledger/journals/reverse", { body: reversal, token: await serviceToken() }),
+});
+
+export interface DocumentRef {
+  id: string;
+  number: string | null;
+  status: string;
+  contactId: string;
+  contactName: string;
+  date: string;
+  dueDate: string;
+  total: string;
+  amountPaid: string;
+  amountDue: string;
+}
+
+export const invoicesLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<DocumentRef>(client, "/internal/sales/invoices/lookup", serviceToken);
+
+export const billsLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<DocumentRef>(client, "/internal/purchases/bills/lookup", serviceToken);
+
+export interface AllocationRequest {
+  organizationId: string;
+  paymentId: string;
+  allocations: Array<{ id: string; documentId: string; amount: string }>;
+}
+
+export interface Allocations {
+  apply(request: AllocationRequest): Promise<{ applied: number }>;
+  reverse(request: { organizationId: string; paymentId: string }): Promise<{ reversed: number }>;
+}
+
+export const allocationsClient = (
+  client: Client,
+  service: "sales" | "purchases",
+  serviceToken: ServiceToken,
+): Allocations => ({
+  apply: async (request) =>
+    client.post(`/internal/${service}/allocations`, { body: request, token: await serviceToken() }),
+  reverse: async (request) =>
+    client.post(`/internal/${service}/allocations/reverse`, { body: request, token: await serviceToken() }),
+});
+
+export interface ProfileRef {
+  organizationId: string;
+  legalName: string;
+  taxId: string | null;
+  address: string | null;
+  currency: "IDR";
+  fiscalYearStartMonth: number;
+}
+
+export interface BalanceRow {
+  accountId: string;
+  debit: string;
+  credit: string;
+}
+
+export const chartLookup =
+  (client: Client, serviceToken: ServiceToken) =>
+  async (organizationId: string): Promise<AccountRef[]> =>
+    client.get("/internal/accounts/chart", { query: { organizationId }, token: await serviceToken() });
+
+export const profileLookup =
+  (client: Client, serviceToken: ServiceToken) =>
+  async (organizationId: string): Promise<ProfileRef | null> => {
+    try {
+      return await client.get<ProfileRef>("/internal/organization/profile", {
+        query: { organizationId },
+        token: await serviceToken(),
+      });
+    } catch (error) {
+      if ((error as { status?: number }).status === 404) return null;
+      throw error;
+    }
+  };
+
+export type Balances = (
+  organizationId: string,
+  range: { from?: string; to: string; accountId?: string[] },
+) => Promise<BalanceRow[]>;
+
+export const balancesLookup =
+  (client: Client, serviceToken: ServiceToken): Balances =>
+  async (organizationId, range) =>
+    client.get("/internal/ledger/balances", {
+      query: { organizationId, from: range.from, to: range.to, accountId: range.accountId },
+      token: await serviceToken(),
+    });
+
+export interface PaymentRef {
+  id: string;
+  number: string;
+  kind: "receipt" | "disbursement";
+  status: "recorded" | "void";
+  contactId: string;
+  contactName: string;
+  date: string;
+  cashAccountId: string;
+  amount: string;
+  reference: string | null;
+}
+
+export const paymentsLookup = (client: Client, serviceToken: ServiceToken) =>
+  lookup<PaymentRef>(client, "/internal/payments/lookup", serviceToken);
+
+export interface EmailRequest {
+  organizationId: string;
+  template: "invoice.issued";
+  to: string;
+  data: Record<string, unknown>;
+}
+
+export const notificationClient = (client: Client, serviceToken: ServiceToken) => ({
+  queue: async (email: EmailRequest, idempotencyKey: string) =>
+    client.post<{ id: string }>("/internal/notification/messages", {
+      body: email,
+      idempotencyKey,
+      token: await serviceToken(),
+    }),
+});
+
+export type Notification = ReturnType<typeof notificationClient>;

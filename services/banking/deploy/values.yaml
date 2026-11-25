@@ -1,0 +1,7 @@
+image:
+  repository: banking
+route:
+  enabled: true
+  pathPrefix: /api/banking
+database:
+  enabled: true

@@ -1,0 +1,15 @@
+{
+  "name": "@deus/cache",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.10.0"
+  },
+  "devDependencies": {
+    "@deus/telemetry": "workspace:*"
+  }
+}

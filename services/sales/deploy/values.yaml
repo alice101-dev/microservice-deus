@@ -1,0 +1,7 @@
+image:
+  repository: sales
+route:
+  enabled: true
+  pathPrefix: /api/sales
+database:
+  enabled: true

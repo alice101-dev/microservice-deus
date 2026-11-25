@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "service.name" . }}
+  labels:
+    {{- include "service.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "service.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "service.labels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+    spec:
+      serviceAccountName: {{ include "service.name" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.shutdown.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- include "service.podSecurityContext" . | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "service.selectorLabels" . | nindent 14 }}
+      containers:
+        - name: app
+          image: {{ include "service.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+          env:
+            {{- include "service.commonEnv" . | nindent 12 }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SERVICE_IDENTITY_DIR
+              value: /var/run/secrets/deus
+            - name: PORT
+              value: {{ .Values.port | quote }}
+            - name: SHUTDOWN_DRAIN_MS
+              value: {{ .Values.shutdown.drainMs | quote }}
+            - name: SHUTDOWN_FLUSH_MS
+              value: {{ .Values.shutdown.flushMs | quote }}
+            - name: PYROSCOPE_SERVER_ADDRESS
+              value: {{ .Values.telemetry.profilingEndpoint | quote }}
+            {{- if .Values.database.enabled }}
+            {{- include "service.databaseEnv" (dict "context" . "role" "app") | nindent 12 }}
+            - name: DB_MAX_CONNECTIONS
+              value: {{ .Values.database.maxConnections | quote }}
+            {{- end }}
+            {{- if .Values.cache.enabled }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cache.secret }}
+                  key: url
+            {{- end }}
+            {{- range .Values.generatedSecrets }}
+            - name: {{ .env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-%s" (include "service.name" $) .name }}
+                  key: value
+            {{- end }}
+            {{- range $name, $value := .Values.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- include "service.securityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: service-identity
+              mountPath: /var/run/secrets/deus
+              readOnly: true
+      volumes:
+        - name: service-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.serviceIdentity.audience }}
+                  expirationSeconds: {{ .Values.serviceIdentity.expirationSeconds }}
+                  path: service/token
+              - serviceAccountToken:
+                  expirationSeconds: {{ .Values.serviceIdentity.expirationSeconds }}
+                  path: kube/token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: kube/ca.crt

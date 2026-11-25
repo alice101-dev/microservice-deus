@@ -1,0 +1,12 @@
+name: dashboard
+image:
+  repository: web
+route:
+  enabled: true
+  pathPrefix: /
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 192Mi

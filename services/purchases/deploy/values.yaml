@@ -1,0 +1,7 @@
+image:
+  repository: purchases
+route:
+  enabled: true
+  pathPrefix: /api/purchases
+database:
+  enabled: true

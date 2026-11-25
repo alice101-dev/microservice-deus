@@ -1,0 +1,16 @@
+{
+  "name": "@deus/logger",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@deus/config": "workspace:*",
+    "@opentelemetry/api": "1.10.0"
+  },
+  "devDependencies": {
+    "@deus/telemetry": "workspace:*"
+  }
+}
